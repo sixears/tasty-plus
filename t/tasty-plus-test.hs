@@ -27,7 +27,7 @@ main ∷ IO ()
 main = do
   tastyOpts ← customExecParser (prefs showHelpOnError) $
                  info (helper <*> tastyOptParser tests)
-                      (fullDesc <> progDesc "tests for Fluffy.Tasty"
+                      (fullDesc <> progDesc "tests tasty-plus"
                                 <> failureCode 254)
 
   _ ← runTests_ tastyOpts

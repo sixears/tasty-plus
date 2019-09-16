@@ -27,9 +27,13 @@ module TastyPlus
   , assertListEqS
   , assertSuccess
 
-  , ioTests
+  , ioTests, mainTests
 
-  , runTests, runTests_, runTestsP, runTestsP_, runTestTree
+  , propAssociative
+  , propInvertibleString, propInvertibleText, propInvertibleUtf8
+
+  , runTests, runTests_, runTestsP, runTestsP_, runTestTree, runTestTree'
+  , runTestsReplay
 
   , withResource'
 
@@ -38,8 +42,11 @@ module TastyPlus
   )
 where
 
+import Prelude  ( fromIntegral )
+
 -- base --------------------------------
 
+import Control.Applicative     ( (<*>) )
 import Control.Exception       ( SomeException, handle )
 import Control.Monad           ( (>>=), (>>), return )
 import Control.Monad.IO.Class  ( MonadIO, liftIO )
@@ -51,11 +58,11 @@ import Data.Function           ( ($), const, flip )
 import Data.Functor            ( (<$>), fmap )
 import Data.Int                ( Int )
 import Data.List               ( zip, zipWith3 )
-import Data.Maybe              ( Maybe( Just, Nothing )  )
+import Data.Maybe              ( Maybe( Just, Nothing ), fromMaybe  )
 import Data.Monoid             ( (<>), mempty )
 import Data.String             ( String, unlines )
-import System.Exit             ( ExitCode( ExitFailure, ExitSuccess )
-                               , exitWith )
+import Numeric.Natural         ( Natural )
+import System.Exit             ( ExitCode( ExitFailure, ExitSuccess ) )
 import System.IO               ( IO )
 import Text.Show               ( Show( show ) )
 
@@ -67,7 +74,12 @@ import Data.Monoid.Unicode    ( (⊕) )
 
 -- data-textual ------------------------
 
-import Data.Textual  ( Printable, toString, toText )
+import Data.Textual  ( Parsed( Parsed ), Printable, Textual, parseString
+                     , parseText, parseUtf8, toString, toText, toUtf8 )
+
+-- exited ------------------------------
+
+import Exited  ( Exited( Exited ), doMain', exitWith )
 
 -- monaderror-io -----------------------
 
@@ -80,7 +92,10 @@ import Control.Monad.Except  ( runExceptT )
 
 -- optparse-applicative ----------------
 
-import Options.Applicative.Types  ( Parser )
+import Options.Applicative.Builder  ( failureCode, fullDesc, info, prefs
+                                    , progDesc, showHelpOnError )
+import Options.Applicative.Extra    ( customExecParser, helper )
+import Options.Applicative.Types    ( Parser )
 
 -- safe --------------------------------
 
@@ -91,7 +106,7 @@ import Safe  ( atMay )
 import Test.Tasty          ( TestName, TestTree
                            , defaultIngredients, testGroup, withResource )
 import Test.Tasty.Options  ( OptionSet )
-import Test.Tasty.Runners  ( suiteOptionParser, tryIngredients )
+import Test.Tasty.Runners  ( TestPattern, suiteOptionParser, tryIngredients )
 import Test.Tasty.Options  ( singleOption )
 import Test.Tasty.Runners  ( parseTestPattern )
 
@@ -102,21 +117,12 @@ import Test.Tasty.HUnit  ( Assertion
 
 -- tasty-quickcheck --------------------
 
-import Test.Tasty.QuickCheck  ( Property, (===) )
+import Test.Tasty.QuickCheck  ( Property, QuickCheckReplay( QuickCheckReplay )
+                              , (===) )
 
 -- text --------------------------------
 
 import Data.Text  ( Text, pack, unpack )
-
-------------------------------------------------------------
---                     local imports                      --
-------------------------------------------------------------
-
--- import Fluffy.Foldable       ( length )
--- import Fluffy.Functor        ( (⊲), (⊳) )
--- import Fluffy.HasIndex       ( (!!) )
--- import Fluffy.MonadIO        ( Exited, exitWith )
--- import Fluffy.Natural        ( nats )
 
 -------------------------------------------------------------------------------
 
@@ -144,7 +150,7 @@ rrExitCode TestRunFailure = ExitFailure 2
 infix 1 ≟
 (≟) ∷ (Eq α, Show α) ⇒ α → α → Assertion
 (≟) = (@=?)
-  
+
 ----------------------------------------
 
 {- | synonym for `===` -}
@@ -160,37 +166,74 @@ assertSuccess t = assertBool (toString t) True
 
 ----------------------------------------
 
--- | run some tests, return success if all pass, 1 if some fail, 2 if setup
---   failed
-runTests ∷ MonadIO μ ⇒ TastyOpts → μ TastyRunResult
-runTests (TastyOpts{..}) =
+{- | Run some tests with given tasty options; return success if all pass, 1 if
+     some fail, 2 if setup failed -}
+runTests_ ∷ MonadIO μ ⇒ TastyOpts → μ TastyRunResult
+runTests_ (TastyOpts{..}) =
   liftIO $ case tryIngredients defaultIngredients optSet testTree of
     Just run_tests → bool TestsFailed TestSuccess <$> run_tests
     Nothing        → return TestRunFailure
 
--- | run some tests, exit on failure (success / 1 ⇒ some tests failed / 2 ⇒
---   failed to run)
-runTests_ ∷ MonadIO μ ⇒ TastyOpts → μ ExitCode
-runTests_ = (rrExitCode <$>) ∘ runTests
+{- | Run some tests, return exit code on failure (0 = success; 1 = some tests
+     failed; 2 = failed to run). -}
+runTests ∷ MonadIO μ ⇒ TastyOpts → μ ExitCode
+runTests = (rrExitCode <$>) ∘ runTests_
 
 ----------------------------------------
 
-runTestTree ∷ MonadIO μ ⇒ TestTree → μ TastyRunResult
-runTestTree tree = runTests (TastyOpts tree mempty)
+{- | Run a test tree, with default options. -}
+runTestTree_ ∷ MonadIO μ ⇒ TestTree → μ TastyRunResult
+runTestTree_ tree = runTests_ (TastyOpts tree mempty)
 
 ----------------------------------------
 
--- | runTests, with a given pattern (use "" to run everything)
-runTestsP ∷ (MonadIO μ) ⇒ TestTree → String → μ TastyRunResult
-runTestsP ts "" =
-  runTests (TastyOpts ts mempty)
-runTestsP ts pat =
+{- | Run a test tree, with default options.  See `runTests` for exit codes. -}
+runTestTree ∷ MonadIO μ ⇒ TestTree → μ ExitCode
+runTestTree tree = rrExitCode <$> runTestTree_ tree
+
+----------------------------------------
+
+{- | Run a test tree, with default options.  Designed for simple "main"
+     invocations, e.g., as part of t/*.hs -}
+runTestTree' ∷ TestTree → IO ()
+runTestTree' = doMain' ∘ runTestTree
+
+----------------------------------------
+
+{- | Run tests, with a given pattern (use "" to run everything). -}
+runTestsP_ ∷ (MonadIO μ) ⇒ TestTree → String → μ TastyRunResult
+runTestsP_ ts "" =
+  runTests_ (TastyOpts ts mempty)
+runTestsP_ ts pat =
   case parseTestPattern $ toString pat of
-    Just p  → runTests (TastyOpts ts (singleOption p))
+    Just p  → runTests_ (TastyOpts ts (singleOption p))
     Nothing → return TestSuccess
 
-runTestsP_ ∷ MonadIO μ ⇒ TestTree → String → μ ()
-runTestsP_ ts pat = runTestsP ts pat >>= liftIO ∘ exitWith ∘ rrExitCode
+----------------------------------------
+
+{- | Run tests, with a given pattern (use "" to run everything). -}
+runTestsP ∷ (MonadIO μ) ⇒ TestTree → String → μ ExitCode
+runTestsP ts pat = rrExitCode <$> runTestsP_ ts pat
+
+----------------------------------------
+
+runTestsReplay_ ∷ TestTree → String → Natural → IO TastyRunResult
+runTestsReplay_ ts s r = do
+  let replayO ∷ Natural → OptionSet
+      replayO = singleOption ∘ QuickCheckReplay ∘ Just ∘ fromIntegral
+      tryOpt ∷ TestPattern → TestTree → Maybe (IO Bool)
+      tryOpt p = tryIngredients defaultIngredients $
+                     singleOption p ⊕ replayO r
+
+  case parseTestPattern s of
+    Just p  → fromMaybe (return TestRunFailure) $
+                fmap (bool TestsFailed TestSuccess) <$> tryOpt p ts
+    Nothing → return TestRunFailure
+
+{- | Run some tests (matching a pattern) with a replay code.  Use "" to run
+     all tests -}
+runTestsReplay ∷ TestTree → String → Natural → IO ExitCode
+runTestsReplay ts s r = rrExitCode <$> runTestsReplay_ ts s r
 
 ----------------------------------------
 
@@ -203,6 +246,19 @@ optParser testTree =
 -- | alternate name for client convenience
 tastyOptParser ∷ TestTree → Parser TastyOpts
 tastyOptParser = optParser
+
+----------------------------------------
+
+{- | Wrapper for tests as main, e.g., in t/*.hs . -}
+mainTests ∷ MonadIO μ ⇒ String → TestTree → μ ()
+mainTests desc ts = do
+  tastyOpts ← liftIO $
+              customExecParser (prefs showHelpOnError) $
+                info (helper <*> tastyOptParser ts)
+                     (fullDesc ⊕ progDesc desc ⊕ failureCode 254)
+
+  Exited ← runTests tastyOpts >>= exitWith
+  return ()
 
 ----------------------------------------
 
@@ -427,16 +483,33 @@ ioTests name ts ioa =
 withResource' ∷ IO α → (IO α → TestTree) → TestTree
 withResource' = flip withResource (const $ return ())
 
+-- Common Properties ---------------------------------------
+
+propInvertibleString ∷ (Eq α, Show α, Textual α) ⇒ α → Property
+propInvertibleString d =
+  parseString (toString d) ≣ Parsed d
+
+propInvertibleText ∷ (Eq α, Show α, Textual α) ⇒ α → Property
+propInvertibleText d =
+  parseText (toText d) ≣ Parsed d
+
+propInvertibleUtf8 ∷ (Eq α, Show α, Textual α) ⇒ α → Property
+propInvertibleUtf8 d =
+  parseUtf8 (toUtf8 d) ≣ Parsed d
+
+propAssociative ∷ (Eq α, Show α) ⇒ (α → α → α) → α → α → α → Property
+propAssociative f a b c = f a (f b c)  ≣ f (f a b) c
+
 --------------------------------------------------------------------------------
 --                                   tests                                    --
 --------------------------------------------------------------------------------
 
 _test0 ∷ IO TastyRunResult
 _test0 = -- test that runTestsP correctly selects only the working tests
-         runTestsP tests "simpleTest/t"
+         runTestsP_ tests "simpleTest/t"
 
 _test1 ∷ IO TastyRunResult
-_test1 = runTestsP tests "normal"
+_test1 = runTestsP_ tests "normal"
 
 _test ∷ IO ()
 _test = do
@@ -447,8 +520,33 @@ _test = do
 
 _ftest ∷ IO ()
 _ftest = do
-  TestSuccess ← runTestTree _failTests
+  TestSuccess ← runTestTree_ _failTests
   return ()
+
+----------------------------------------
+
+{- | Simple tests, with a failure, to allow for a pattern to select only the
+     passing tests.
+-}
+
+mkSimpleTests ∷ Foldable t ⇒
+                t ((String → Int → Int → TestTree) → [TestTree]) → TestTree
+mkSimpleTests ts =
+  let tC ∷ String → Int → Int → TestTree
+      tC name got expect = testCase name $ got @?= expect
+   in testGroup "simple" $ concatMap ($ tC) ts
+
+----------------------------------------
+
+simpleTestsS ∷ (String → Int → Int → TestTree) → [TestTree]
+simpleTestsS tC = [ tC "two" 2 2, tC "three" 3 3 ]
+
+----------------------------------------
+
+simpleTestsF ∷ (String → Int → Int → TestTree) → [TestTree]
+simpleTestsF tC = [ tC "one" 1 2 {- deliberate fail -} ]
+
+----------------------------------------
 
 tests ∷ TestTree
 tests = testGroup "tests" [ unitTests ]
@@ -469,7 +567,7 @@ normalTests = testGroup "normal" [ assertEqTests
 
 _failTests ∷ TestTree
 _failTests =
-  let failIt name tree = testCase name $ runTestTree tree >>= (@?= TestsFailed)
+  let failIt name tree = testCase name $ runTestTree_ tree >>= (@?= TestsFailed)
    in testGroup "fail"
                  [ failIt "simpleTests"         (mkSimpleTests [simpleTestsF])
                  , failIt "assertEq"            assertEqTestsF
@@ -478,28 +576,5 @@ _failTests =
                  , failIt "assertListEqTestsF"  assertListEqTestsF
                  , failIt "assertListEqRTestsF" assertListEqRTestsF
                  ]
-
-------------------------------------------------------------
-
--- | simple tests, with a failure, to allow for a pattern to select only the
---   passing tests
--- mkSimpleTests ∷ TestTree
-mkSimpleTests ∷ Foldable t ⇒
-                 t ((String → Int → Int → TestTree) → [TestTree])
-              → TestTree
-mkSimpleTests ts =
-  let tC ∷ String → Int → Int → TestTree
-      tC name got expect = testCase name $ got @?= expect
-   in testGroup "simple" $ concatMap ($ tC) ts
-
-----------------------------------------
-
-simpleTestsS ∷ (String → Int → Int → TestTree) → [TestTree]
-simpleTestsS tC = [ tC "two" 2 2, tC "three" 3 3 ]
-
-----------------------------------------
-
-simpleTestsF ∷ (String → Int → Int → TestTree) → [TestTree]
-simpleTestsF tC = [ tC "one" 1 2 {- deliberate fail -} ]
 
 -- that's all, folks! ----------------------------------------------------------

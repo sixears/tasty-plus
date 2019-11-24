@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase            #-}
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE QuasiQuotes           #-}
 {-# LANGUAGE RecordWildCards       #-}
@@ -20,7 +21,9 @@ module TastyPlus
 
   , optParser, tastyOptParser
 
-  , assertAnyException, assertIOException, assertIOException'
+  , assertAnyException, assertAnyExceptionIO
+  , assertException, assertExceptionIO
+  , assertIOException, assertIOException'
   , assertIsLeft, assertLeft, assertRight
   , assertListEq, assertListEqIO, assertListEqIO'
   , assertListEq', assertListEqR, assertListEqR', assertListEqRS
@@ -47,8 +50,8 @@ import Prelude  ( fromIntegral )
 -- base --------------------------------
 
 import Control.Applicative     ( (<*>) )
-import Control.Exception       ( SomeException, handle )
-import Control.Monad           ( (>>=), (>>), return )
+import Control.Exception       ( SomeException, evaluate, handle )
+import Control.Monad           ( (>>=), return )
 import Control.Monad.IO.Class  ( MonadIO, liftIO )
 import Data.Bool               ( Bool( True ), bool )
 import Data.Either             ( Either( Left, Right ) )
@@ -60,7 +63,7 @@ import Data.Int                ( Int )
 import Data.List               ( zip, zipWith3 )
 import Data.Maybe              ( Maybe( Just, Nothing ), fromMaybe  )
 import Data.Monoid             ( (<>), mempty )
-import Data.String             ( String, unlines )
+import Data.String             ( String )
 import Numeric.Natural         ( Natural )
 import System.Exit             ( ExitCode( ExitFailure, ExitSuccess ) )
 import System.IO               ( IO )
@@ -76,6 +79,10 @@ import Data.Monoid.Unicode    ( (⊕) )
 
 import Data.Textual  ( Parsed( Parsed ), Printable, Textual, parseString
                      , parseText, parseUtf8, toString, toText, toUtf8 )
+
+-- deepseq -----------------------------
+
+import Control.DeepSeq  ( NFData, force )
 
 -- exited ------------------------------
 
@@ -122,7 +129,7 @@ import Test.Tasty.QuickCheck  ( Property, QuickCheckReplay( QuickCheckReplay )
 
 -- text --------------------------------
 
-import Data.Text  ( Text, pack, unpack )
+import Data.Text  ( Text, pack )
 
 -------------------------------------------------------------------------------
 
@@ -324,7 +331,7 @@ assertListEq' toT name gotL expectL =
   let got    = toList gotL
       expect = toList expectL
       lCheck g e =
-        assertBool ("length " ⊕ show g ⊕ " did not match expected %d" ⊕ show e)
+        assertBool ("length " ⊕ show g ⊕ " did not match expected " ⊕ show e)
                    (e ≡ g)
       lengthCheck g e = lCheck (length g) (length e)
       assertItem gt exp i = let nm = name <> ": " <> show i
@@ -418,8 +425,30 @@ assertIsLeft = assertLeft (const $ assertSuccess "is Left")
 
 ----------------------------------------
 
-assertAnyException ∷ Text → (SomeException → Bool) → IO α → Assertion
-assertAnyException t h io = handle (\e → assertBool (unlines [unpack t, show e]) $ h e) (io >> assertFailure (unpack t <> ":no exception thrown"))
+
+{- | Check that any exception is thrown.  Any exception will cause the test
+     to pass; no exception will cause it to fail.
+ -}
+assertAnyException ∷ (NFData α) ⇒ String → α → IO ()
+assertAnyException n = assertException n (const True)
+
+assertAnyExceptionIO ∷ (NFData α) ⇒ String → IO α → IO ()
+assertAnyExceptionIO n = assertExceptionIO n (const True)
+
+{- | Check that an exception is thrown.  Any exception that is thrown is
+     checked by the given predicate; the predicate pass to indicate that the
+     exception is as desired; and thus a @False@ will cause a test failure.  The
+     test itself, if it returns a value (without an exception) will pass; but
+     note that being IO, it can itself run tests...
+ -}
+assertException ∷ (NFData α) ⇒ String → (SomeException → Bool) → α → IO ()
+assertException n p v = assertExceptionIO n p (return v)
+
+assertExceptionIO ∷ (NFData α) ⇒ String → (SomeException → Bool) → IO α → IO ()
+assertExceptionIO n p io =
+  handle (return ∘ Left) (Right <$> (io >>= evaluate ∘ force)) >>= \ case
+    Left e → assertBool n (p e)
+    Right _ → assertFailure ("no exception thrown: " ⊕ n)
 
 ----------------------------------------
 

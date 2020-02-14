@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE LambdaCase            #-}
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE QuasiQuotes           #-}
@@ -150,20 +151,27 @@ rrExitCode TestRunFailure = ExitFailure 2
 
 ------------------------------------------------------------
 
-{- | Pronounced 'test', this tests for equality; it's `(@=?)`; note that puts
-     the 'got' or 'actual' value as the last argument, to allow for easier
-     partial application.
+newtype ShowEqPrintable α = ShowEqPrintable α
+  deriving Eq
+
+instance Printable α ⇒ Show (ShowEqPrintable α) where
+  show (ShowEqPrintable a) = toString a
+
+{- | Pronounced 'test', this tests for equality; it's a variant of `(@=?)` that
+     uses `Printable` rather than `Show` for error messages; note that the 'got'
+     or 'actual' value is the last argument, to allow for easier partial
+     application.
  -}
 infix 1 ≟
-(≟) ∷ (Eq α, Show α) ⇒ α → α → Assertion
-(≟) = (@=?)
+(≟) ∷ (Eq α, Printable α) ⇒ α → α → Assertion
+x ≟ y = ShowEqPrintable x @=? ShowEqPrintable y
 
 ----------------------------------------
 
-{- | synonym for `===` -}
+{- | Almost-synonym for `===`, but using `Printable` instead of `Show`. -}
 infix 4 ≣
-(≣) ∷ (Eq a, Show a) ⇒ a → a → Property
-(≣) = (===)
+(≣) ∷ (Eq α, Printable α) ⇒ α → α → Property
+x ≣ y = ShowEqPrintable x === ShowEqPrintable y
 
 ----------------------------------------
 
@@ -514,19 +522,20 @@ withResource' = flip withResource (const $ return ())
 
 -- Common Properties ---------------------------------------
 
-propInvertibleString ∷ (Eq α, Show α, Textual α) ⇒ α → Property
+propInvertibleString ∷ (Eq α, Printable α, Printable (Parsed α), Textual α) ⇒
+                       α → Property
 propInvertibleString d =
   parseString (toString d) ≣ Parsed d
 
-propInvertibleText ∷ (Eq α, Show α, Textual α) ⇒ α → Property
-propInvertibleText d =
-  parseText (toText d) ≣ Parsed d
+propInvertibleText ∷ (Eq α, Printable α, Printable (Parsed α), Textual α) ⇒
+                     α → Property
+propInvertibleText d = parseText (toText d) ≣ Parsed d
 
-propInvertibleUtf8 ∷ (Eq α, Show α, Textual α) ⇒ α → Property
-propInvertibleUtf8 d =
-  parseUtf8 (toUtf8 d) ≣ Parsed d
+propInvertibleUtf8 ∷ (Eq α, Printable α, Printable (Parsed α), Textual α) ⇒
+                     α → Property
+propInvertibleUtf8 d = parseUtf8 (toUtf8 d) ≣ Parsed d
 
-propAssociative ∷ (Eq α, Show α) ⇒ (α → α → α) → α → α → α → Property
+propAssociative ∷ (Eq α, Printable α) ⇒ (α → α → α) → α → α → α → Property
 propAssociative f a b c = f a (f b c)  ≣ f (f a b) c
 
 --------------------------------------------------------------------------------

@@ -7,7 +7,7 @@ name:                tasty-plus
 -- PVP summary:      +-+------- breaking API changes
 --                   | | +----- non-breaking API additions
 --                   | | | +--- code changes with no API change
-version:             1.1.0.0
+version:             1.2.0.0
 
 -- A short (one-line) description of the package.
 synopsis:            Additional utilities for working with Tasty
@@ -60,7 +60,7 @@ library
                      , mtl, optparse-applicative, safe, tasty, tasty-hunit
                      , tasty-quickcheck, text
 
-                     , exited >= 1.0.2.0, monaderror-io >= 1.0.0.0
+                     , exited >= 1.0.2.0, monaderror-io >= 1.0.3.0
 
   -- Directories containing source files.
   hs-source-dirs:      src

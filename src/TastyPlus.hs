@@ -1,10 +1,12 @@
 {-# LANGUAGE FlexibleContexts      #-}
+{-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE LambdaCase            #-}
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE QuasiQuotes           #-}
 {-# LANGUAGE RecordWildCards       #-}
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
+{-# LANGUAGE TypeApplications      #-}
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE UnicodeSyntax         #-}
 {-# LANGUAGE ViewPatterns          #-}
@@ -46,7 +48,7 @@ module TastyPlus
   )
 where
 
-import Prelude  ( fromIntegral )
+import Prelude  ( (*), fromIntegral )
 
 -- base --------------------------------
 
@@ -61,9 +63,10 @@ import Data.Foldable           ( Foldable, concat, concatMap, length, toList )
 import Data.Function           ( ($), const, flip )
 import Data.Functor            ( (<$>), fmap )
 import Data.Int                ( Int )
-import Data.List               ( zip, zipWith3 )
+import Data.List               ( intercalate, zip, zipWith3 )
 import Data.Maybe              ( Maybe( Just, Nothing ), fromMaybe  )
 import Data.Monoid             ( (<>), mempty )
+import Data.Ratio              ( Rational )
 import Data.String             ( String )
 import Numeric.Natural         ( Natural )
 import System.Exit             ( ExitCode( ExitFailure, ExitSuccess ) )
@@ -78,8 +81,10 @@ import Data.Monoid.Unicode    ( (⊕) )
 
 -- data-textual ------------------------
 
-import Data.Textual  ( Parsed( Parsed ), Printable, Textual, parseString
-                     , parseText, parseUtf8, toString, toText, toUtf8 )
+import Data.Textual  ( Parsed( Parsed, Malformed ), Printable( print ), Textual
+                     , parseString, parseText, parseUtf8, toString, toText
+                     , toUtf8
+                     )
 
 -- deepseq -----------------------------
 
@@ -126,11 +131,15 @@ import Test.Tasty.HUnit  ( Assertion
 -- tasty-quickcheck --------------------
 
 import Test.Tasty.QuickCheck  ( Property, QuickCheckReplay( QuickCheckReplay )
-                              , (===) )
+                              , (===), testProperty )
 
 -- text --------------------------------
 
 import Data.Text  ( Text, pack )
+
+-- text-printer ------------------------
+
+import qualified  Text.Printer  as  P
 
 -------------------------------------------------------------------------------
 
@@ -522,18 +531,28 @@ withResource' = flip withResource (const $ return ())
 
 -- Common Properties ---------------------------------------
 
-propInvertibleString ∷ (Eq α, Printable α, Printable (Parsed α), Textual α) ⇒
-                       α → Property
-propInvertibleString d =
-  parseString (toString d) ≣ Parsed d
+newtype P α = P α
+  deriving Eq
 
-propInvertibleText ∷ (Eq α, Printable α, Printable (Parsed α), Textual α) ⇒
-                     α → Property
-propInvertibleText d = parseText (toText d) ≣ Parsed d
+instance Printable α ⇒ Printable (P (Parsed α)) where
+  print (P (Parsed a))       = P.string (toString a)
+  print (P (Malformed [] s)) =
+    let quote t = "'" <> t <> "'"
+     in P.string $ "MALFORMED: " <> quote s
+  print (P (Malformed ss s)) =
+    let quote     t  = "'" <> t <> "'"
+        bracketsp t  = "[ " <> t <> " ]"
+        list    ts = bracketsp $ intercalate ", " (quote <$> ts)
+     in P.string $ "MALFORMED: " <> quote s <> " " <> list ss
 
-propInvertibleUtf8 ∷ (Eq α, Printable α, Printable (Parsed α), Textual α) ⇒
-                     α → Property
-propInvertibleUtf8 d = parseUtf8 (toUtf8 d) ≣ Parsed d
+propInvertibleString ∷ (Eq α, Printable α, Textual α) ⇒ α → Property
+propInvertibleString d = P (parseString (toString d)) ≣ P (Parsed d)
+
+propInvertibleText ∷ (Eq α, Printable α, Textual α) ⇒ α → Property
+propInvertibleText d = P (parseText (toText d)) ≣ P (Parsed d)
+
+propInvertibleUtf8 ∷ (Eq α, Printable α, Textual α) ⇒ α → Property
+propInvertibleUtf8 d = P (parseUtf8 (toUtf8 d)) ≣ P (Parsed d)
 
 propAssociative ∷ (Eq α, Printable α) ⇒ (α → α → α) → α → α → α → Property
 propAssociative f a b c = f a (f b c)  ≣ f (f a b) c
@@ -587,7 +606,7 @@ simpleTestsF tC = [ tC "one" 1 2 {- deliberate fail -} ]
 ----------------------------------------
 
 tests ∷ TestTree
-tests = testGroup "tests" [ unitTests ]
+tests = testGroup "tests" [ unitTests, pTests, propTests ]
 
 unitTests ∷ TestTree
 unitTests = testGroup "unitTests" [ hunitGroup ]
@@ -614,5 +633,29 @@ _failTests =
                  , failIt "assertListEqTestsF"  assertListEqTestsF
                  , failIt "assertListEqRTestsF" assertListEqRTestsF
                  ]
+
+pTests ∷ TestTree
+pTests =
+  testGroup "P.normal"
+            [ testCase "malformed (0)" $
+                  "MALFORMED: 'foo'"
+                ≟ toString (P $ Malformed @String [] "foo")
+            , testCase "malformed (1)" $
+                  "MALFORMED: 'foo' [ 'a', 'b', 'c' ]"
+                ≟ toString (P $ Malformed @String ["a","b","c"] "foo")
+            , testCase "parsed" $ "bar" ≟ toString (P $ Parsed @String "bar")
+            ]
+
+propTests ∷ TestTree
+propTests =
+  testGroup "prop.normal"
+            [ testGroup "Rational - Invertible"
+                        [ testProperty "String" (propInvertibleString @Rational)
+                        , testProperty "Text"   (propInvertibleText   @Rational)
+                        , testProperty "Utf8"   (propInvertibleUtf8   @Rational)
+                        ]
+            , testGroup "Rational - Associative"
+                        [ testProperty "*" (propAssociative @Rational (*))]
+            ]
 
 -- that's all, folks! ----------------------------------------------------------

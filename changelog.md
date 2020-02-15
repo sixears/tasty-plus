@@ -1,3 +1,7 @@
+1.3.0.0 2020-02-15
+==================
+- better Printable handling for property tests; also add some tests
+
 1.2.0.0 2020-02-14
 ==================
 - use Printable rather than Show for many functions

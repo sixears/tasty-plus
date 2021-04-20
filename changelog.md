@@ -1,3 +1,11 @@
+1.4.1.0 2021-04-20
+==================
+- add withResourceCleanup
+
+1.4.0.0 2020-09-15
+==================
+- add Equish, assertCmp', assertListCmp, withResource2{,'}
+
 1.3.0.0 2020-02-15
 ==================
 - better Printable handling for property tests; also add some tests

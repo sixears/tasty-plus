@@ -25,9 +25,11 @@ module TastyPlus
   , optParser, tastyOptParser
 
   , assertAnyException, assertAnyExceptionIO
+  , assertCmp'
   , assertException, assertExceptionIO
   , assertIOException, assertIOException'
   , assertIsLeft, assertLeft, assertRight
+  , assertListCmp, assertListCmpIO
   , assertListEq, assertListEqIO, assertListEqIO'
   , assertListEq', assertListEqR, assertListEqR', assertListEqRS
   , assertListEqS
@@ -41,7 +43,7 @@ module TastyPlus
   , runTests, runTests_, runTestsP, runTestsP_, runTestTree, runTestTree'
   , runTestsReplay
 
-  , withResource'
+  , withResource', withResourceCleanup, withResource2, withResource2'
 
   -- for testing this module
   , tests
@@ -53,13 +55,13 @@ import Prelude  ( (*), fromIntegral )
 -- base --------------------------------
 
 import Control.Applicative     ( (<*>) )
-import Control.Exception       ( SomeException, evaluate, handle )
+import Control.Exception       ( SomeException, evaluate, handle, onException )
 import Control.Monad           ( (>>=), return )
 import Control.Monad.IO.Class  ( MonadIO, liftIO )
 import Data.Bool               ( Bool( True ), bool )
 import Data.Either             ( Either( Left, Right ) )
 import Data.Eq                 ( Eq )
-import Data.Foldable           ( Foldable, concat, concatMap, length, toList )
+import Data.Foldable           ( Foldable, concatMap, length, toList )
 import Data.Function           ( ($), const, flip )
 import Data.Functor            ( (<$>), fmap )
 import Data.Int                ( Int )
@@ -68,6 +70,7 @@ import Data.Maybe              ( Maybe( Just, Nothing ), fromMaybe  )
 import Data.Monoid             ( (<>), mempty )
 import Data.Ratio              ( Rational )
 import Data.String             ( String )
+import GHC.Stack               ( HasCallStack )
 import Numeric.Natural         ( Natural )
 import System.Exit             ( ExitCode( ExitFailure, ExitSuccess ) )
 import System.IO               ( IO )
@@ -98,6 +101,12 @@ import Exited  ( Exited( Exited ), doMain', exitWith )
 
 import MonadError.IO        ( asIOError )
 import MonadError.IO.Error  ( AsIOError, IOError )
+
+-- more-unicode ------------------------
+
+import Data.MoreUnicode.Bool     ( 𝔹 )
+import Data.MoreUnicode.Functor  ( (⊳) )
+import Data.MoreUnicode.Monad    ( (≫) )
 
 -- mtl ---------------------------------
 
@@ -286,51 +295,79 @@ mainTests desc ts = do
 
 ----------------------------------------
 
-{- | Compare two lists for equality, with itemized testing.  We take the inputs
-     as IO to allow for, well, IO.
+assertCmp' ∷ HasCallStack ⇒
+             (α → Text) → (β → Text) → (α → β → 𝔹) → α → Maybe β → Assertion
+assertCmp' toTa _ _ expected Nothing =
+       assertFailure ("expected: " ⊕ toString (toTa expected)
+                                   ⊕ "\nbut got Nothing")
+assertCmp' toTa toTb cmp expected (Just got) =
+  let toSa = toString ∘ toTa
+      toSb = toString ∘ toTb
+   in -- equalize prefix lengths to make it easier to diff strings, etc.
+       assertBool ("expected: " ⊕ toSa expected ⊕ "\nbut got : " ⊕ toSb got)
+                  (cmp expected got)
+
+{- | Compare two lists for compatibility, with customized, itemized testing.
+     We take the inputs as IO to allow for, well, IO.
  -}
-assertListEqIO' ∷ (Foldable ψ, Foldable φ, Eq α, Printable σ) ⇒
-                  (α → Text) → σ → ψ α → IO (φ α) → [TestTree]
-assertListEqIO' toT name (toList → expect) (fmap toList → got) =
+assertListCmpIO ∷ (Foldable ψ, Foldable φ, Printable σ, HasCallStack) ⇒
+                    (α → Text) → (β → Text) → (α → β → 𝔹) → σ → ψ α → IO (φ β)
+                  → TestTree
+assertListCmpIO toTa toTb cmp name (toList → expect) (fmap toList → got) =
   let lCheck e g =
         assertBool ("length " ⊕ show g ⊕ " did not match expected " ⊕ show e)
                    (e ≡ g)
       lengthCheck e g = lCheck (length e) (length g)
-      assertItem (i,e) = testCase (toString name ⊕ ": "⊕ show i)
-                                  (got >>= \ g → assertEq' toT' (Just e) (atMay g i))
-      toT' Nothing  = "Nothing"
-      toT' (Just a) = "Just " ⊕ toT a
+      assertItem (i,e) =
+        testCase (show i)
+                 (got ≫ \ g → assertCmp' toTa toTb cmp e (atMay g i))
 
-   in testCase (toString name ⊕ ": count") (got >>= lengthCheck expect)
-    : (assertItem <$> zip [0..] expect)
+   in testGroup (toString name) $
+          testCase "count" (got ≫ lengthCheck expect)
+        : (assertItem ⊳ zip [0..] expect)
 
-assertListEqIO ∷ (Foldable ψ, Foldable φ, Eq α, Printable α) ⇒
-                Text → ψ α → IO (φ α) → [TestTree]
+{- | Compare two lists for equality, with itemized testing and IO. -}
+assertListEqIO' ∷ (Foldable ψ, Foldable φ, Eq α, Printable σ, HasCallStack) ⇒
+                  (α → Text) → σ → ψ α → IO (φ α) → TestTree
+assertListEqIO' toT = assertListCmpIO toT toT (≡)
+
+assertListEqIO ∷ (Foldable ψ, Foldable φ, Eq α, Printable α, HasCallStack) ⇒
+                Text → ψ α → IO (φ α) → TestTree
 assertListEqIO = assertListEqIO' toText
 
--- | compare two lists for equality, with itemized testing
-assertListEq ∷ (Eq α, Printable α, Foldable ψ, Foldable φ) ⇒
-               Text → ψ α → φ α → [TestTree]
+--------------------
+
+{- | Compare two lists for compatibility, with itemized testing. -}
+assertListCmp ∷ (Foldable ψ, Foldable φ, Printable σ, HasCallStack) ⇒
+                  (α → Text) → (β → Text) → (α → β → 𝔹) → σ → ψ α → φ β
+                 → TestTree
+assertListCmp toTa toTb cmp name exp got =
+  assertListCmpIO toTa toTb cmp name exp (return got)
+
+--------------------
+
+{- | Compare two lists for equality, with itemized testing. -}
+assertListEq ∷ (Eq α, Printable α, Foldable ψ, Foldable φ, HasCallStack) ⇒
+               Text → ψ α → φ α → TestTree
 assertListEq name expect got = assertListEqIO name expect (return got)
 
 --------------------
 
 assertListEqTests ∷ TestTree
 assertListEqTests =
-  testGroup "assertListEq" $
-    assertListEq "listTest" [ "foo", "bar", "baz" ∷ String ]
-                            [ "foo", "bar", "baz" ]
+  assertListEq "listTest" [ "foo", "bar", "baz" ∷ String ]
+                          [ "foo", "bar", "baz" ]
 
 assertListEqTestsF ∷ TestTree
 assertListEqTestsF =
   testGroup "assertListEq fail" $
-    concat [ assertListEq "listTest<" [ "foo", "bar" ]
-                                      [ "foo", "bar", "baz" ∷ Text ]
-           , assertListEq "listTest>" [ "foo", "bar", "baz" ]
-                                      [ "foo", "bar" ∷ Text ]
-           , assertListEq "listTest!" [ "foo", "bar", "baz" ]
-                                      [ "foo", "rab", "baz" ∷ String ]
-           ]
+    [ assertListEq "listTest<" [ "foo", "bar" ]
+                               [ "foo", "bar", "baz" ∷ Text ]
+    , assertListEq "listTest>" [ "foo", "bar", "baz" ]
+                               [ "foo", "bar" ∷ Text ]
+    , assertListEq "listTest!" [ "foo", "bar", "baz" ]
+                               [ "foo", "rab", "baz" ∷ String ]
+    ]
 
 ----------------------------------------
 
@@ -471,12 +508,10 @@ assertExceptionIO n p io =
 
 -- | test that we got an IOException (note, not just any Exception), and that
 --   it matches a given predicate
-assertIOException ∷ (AsIOError ε, Show ρ) ⇒
-                     (ε → Assertion) → IO ρ → Assertion
+assertIOException ∷ (AsIOError ε, Show ρ) ⇒ (ε → Assertion) → IO ρ → Assertion
 assertIOException p io = (runExceptT $ asIOError io) >>= assertLeft p
 
-assertIOException' ∷ (Show ρ) ⇒
-                      (IOError → Assertion) → IO ρ → Assertion
+assertIOException' ∷ (Show ρ) ⇒ (IOError → Assertion) → IO ρ → Assertion
 assertIOException' = assertIOException
 
 ----------------------------------------
@@ -528,6 +563,43 @@ ioTests name ts ioa =
 {- | like `withResource`, but with a no-op release resource -}
 withResource' ∷ IO α → (IO α → TestTree) → TestTree
 withResource' = flip withResource (const $ return ())
+
+----------------------------------------
+
+withResource2 ∷ IO α → (α → IO()) → IO β → (β → IO ()) → (IO α → IO β →TestTree)
+              → TestTree
+withResource2 gain lose gain' lose' ts =
+  withResource gain lose (\ x → withResource gain' lose' (\ x' → ts x x'))
+
+----------------------------------------
+
+withResource2' ∷ IO α → IO β → (IO α → IO β → TestTree)
+              → TestTree
+withResource2' gain gain' ts =
+  withResource' gain (\ x → withResource' gain' (\ x' → ts x x'))
+
+----------------------------------------
+
+{- | For complex tests that need an IO setup; where having acquired the
+     resource, the setup may fail; regular `withResource` doesn't clean that up
+     (since the acquire step throws an exception, the return value is never seen
+     and so cannot be passed to the release); this version splits acquisition
+     and setup.
+
+     If acquisition fails, there should be nothing to release.
+     But if setup fails, the release is called (though of course no tests are
+     run).
+     If the setup succeeds, tests are run, and cleanup is called.
+ -}
+withResourceCleanup ∷ IO α → (α → IO ()) → (α → IO ()) → (IO α → TestTree)
+                    → TestTree
+withResourceCleanup acquire setup release test =
+  let -- safely acquire and run setup; if setup throws an IOException, release
+      -- acquireAndSetup ∷ IO α
+      acquireAndSetup = acquire ≫ \ resource → do
+        onException (setup resource) (release resource)
+        return resource
+   in withResource acquireAndSetup release test
 
 -- Common Properties ---------------------------------------
 
@@ -602,6 +674,8 @@ simpleTestsS tC = [ tC "two" 2 2, tC "three" 3 3 ]
 
 simpleTestsF ∷ (String → Int → Int → TestTree) → [TestTree]
 simpleTestsF tC = [ tC "one" 1 2 {- deliberate fail -} ]
+
+
 
 ----------------------------------------
 

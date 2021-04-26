@@ -7,7 +7,7 @@ name:                tasty-plus
 -- PVP summary:      +-+------- breaking API changes
 --                   | | +----- non-breaking API additions
 --                   | | | +--- code changes with no API change
-version:             1.4.1.0
+version:             1.4.2.0
 
 -- A short (one-line) description of the package.
 synopsis:            Additional utilities for working with Tasty
@@ -58,10 +58,11 @@ library
 
   -- Other library packages from which modules are imported.
   build-depends:       base, base-unicode-symbols, data-textual, deepseq
-                     , mtl, optparse-applicative, safe, tasty, tasty-hunit
-                     , tasty-quickcheck, text, text-printer
+                     , directory, mtl, optparse-applicative, safe, tasty
+                     , tasty-hunit, tasty-quickcheck, temporary, text
+                     , text-printer
 
-                     , exited >= 1.0.3.0, monaderror-io >= 1.0.5.0
+                     , exited >= 1.0.3.0, monaderror-io >= 1.0.6.0
                      , more-unicode >= 0.0.13.0
 
   -- Directories containing source files.

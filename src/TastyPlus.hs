@@ -43,6 +43,7 @@ module TastyPlus
   , runTests, runTests_, runTestsP, runTestsP_, runTestTree, runTestTree'
   , runTestsReplay
 
+  , testInTempDir
   , withResource', withResourceCleanup, withResource2, withResource2'
 
   -- for testing this module
@@ -72,8 +73,9 @@ import Data.Ratio              ( Rational )
 import Data.String             ( String )
 import GHC.Stack               ( HasCallStack )
 import Numeric.Natural         ( Natural )
+import System.Environment      ( getProgName )
 import System.Exit             ( ExitCode( ExitFailure, ExitSuccess ) )
-import System.IO               ( IO )
+import System.IO               ( FilePath, IO )
 import Text.Show               ( Show( show ) )
 
 -- base-unicode-symbols ----------------
@@ -92,6 +94,10 @@ import Data.Textual  ( Parsed( Parsed, Malformed ), Printable( print ), Textual
 -- deepseq -----------------------------
 
 import Control.DeepSeq  ( NFData, force )
+
+-- directory ---------------------------
+
+import System.Directory  ( getTemporaryDirectory, removePathForcibly )
 
 -- exited ------------------------------
 
@@ -141,6 +147,10 @@ import Test.Tasty.HUnit  ( Assertion
 
 import Test.Tasty.QuickCheck  ( Property, QuickCheckReplay( QuickCheckReplay )
                               , (===), testProperty )
+
+-- temporary ---------------------------
+
+import System.IO.Temp  ( createTempDirectory )
 
 -- text --------------------------------
 
@@ -600,6 +610,20 @@ withResourceCleanup acquire setup release test =
         onException (setup resource) (release resource)
         return resource
    in withResource acquireAndSetup release test
+
+------------------------------------------------------------
+
+{- | Perform tests within a temporary directory, with a bespoke temp dir setup
+     function.  The setup function is called with the name of the temp dir
+     (as a filepath: FPath is not available here, as FPath uses TastyPlus); and
+     the tempdir is also provided to the test (as an IO FilePath as a Tasty
+     quirk).
+ -}
+testInTempDir ∷ (FilePath → IO()) → (IO FilePath → TestTree) → TestTree
+testInTempDir setup =
+  withResourceCleanup
+    (getTemporaryDirectory ≫ \ t → getProgName ≫ createTempDirectory t)
+    setup removePathForcibly
 
 -- Common Properties ---------------------------------------
 

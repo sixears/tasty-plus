@@ -27,7 +27,7 @@ module TastyPlus
   , assertAnyException, assertAnyExceptionIO
   , assertCmp'
   , assertException, assertExceptionIO
-  , assertIOException, assertIOException'
+  , assertIOError
   , assertIsLeft, assertLeft, assertRight
   , assertListCmp, assertListCmpIO
   , assertListEq, assertListEqIO, assertListEqIO'
@@ -103,11 +103,6 @@ import System.Directory  ( getTemporaryDirectory, removePathForcibly )
 
 import Exited  ( Exited( Exited ), doMain', exitWith )
 
--- monaderror-io -----------------------
-
-import MonadError.IO        ( asIOError )
-import MonadError.IO.Error  ( AsIOError, IOError )
-
 -- more-unicode ------------------------
 
 import Data.MoreUnicode.Bool     ( 𝔹 )
@@ -116,7 +111,7 @@ import Data.MoreUnicode.Monad    ( (≫) )
 
 -- mtl ---------------------------------
 
-import Control.Monad.Except  ( runExceptT )
+import Control.Monad.Except  ( ExceptT, runExceptT )
 
 -- optparse-applicative ----------------
 
@@ -516,13 +511,8 @@ assertExceptionIO n p io =
 
 ----------------------------------------
 
--- | test that we got an IOException (note, not just any Exception), and that
---   it matches a given predicate
-assertIOException ∷ (AsIOError ε, Show ρ) ⇒ (ε → Assertion) → IO ρ → Assertion
-assertIOException p io = (runExceptT $ asIOError io) >>= assertLeft p
-
-assertIOException' ∷ (Show ρ) ⇒ (IOError → Assertion) → IO ρ → Assertion
-assertIOException' = assertIOException
+assertIOError ∷ Show ρ ⇒ (ε → Assertion) → ExceptT ε IO ρ → Assertion
+assertIOError p io = (runExceptT io) >>= assertLeft p
 
 ----------------------------------------
 

@@ -1,3 +1,12 @@
+1.5.0.0 2021-05-02
+==================
+- remove assertIOException*; and dependency on monaderror-io
+
+1.4.3.0 2021-05-01
+==================
+- add assertIOError; deprecate assertIOException*: towards removing dependency
+  on monaderror-io
+
 1.4.2.0 2021-04-26
 ==================
 - add testInTempDir

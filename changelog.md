@@ -1,3 +1,7 @@
+1.5.0.1 2021-06-09
+==================
+- use tasty >= 1.3 with amended suiteOptionParser typesig
+
 1.5.0.0 2021-05-02
 ==================
 - remove assertIOException*; and dependency on monaderror-io

@@ -1,16 +1,3 @@
-{-# LANGUAGE FlexibleContexts      #-}
-{-# LANGUAGE FlexibleInstances     #-}
-{-# LANGUAGE LambdaCase            #-}
-{-# LANGUAGE OverloadedStrings     #-}
-{-# LANGUAGE QuasiQuotes           #-}
-{-# LANGUAGE RecordWildCards       #-}
-{-# LANGUAGE PartialTypeSignatures #-}
-{-# LANGUAGE ScopedTypeVariables   #-}
-{-# LANGUAGE TypeApplications      #-}
-{-# LANGUAGE TypeFamilies          #-}
-{-# LANGUAGE UnicodeSyntax         #-}
-{-# LANGUAGE ViewPatterns          #-}
-
 {- |
 
 Description: utility functions for working with Tasty testing
@@ -59,18 +46,18 @@ import Control.Applicative     ( (<*>) )
 import Control.Exception       ( SomeException, evaluate, handle, onException )
 import Control.Monad           ( (>>=), return )
 import Control.Monad.IO.Class  ( MonadIO, liftIO )
-import Data.Bool               ( Bool( True ), bool )
-import Data.Either             ( Either( Left, Right ) )
+import Data.Bool               ( bool )
 import Data.Eq                 ( Eq )
 import Data.Foldable           ( Foldable, concatMap, length, toList )
 import Data.Function           ( ($), const, flip )
-import Data.Functor            ( (<$>), fmap )
+import Data.Functor            ( fmap )
 import Data.Int                ( Int )
 import Data.List               ( intercalate, zip, zipWith3 )
-import Data.Maybe              ( Maybe( Just, Nothing ), fromMaybe  )
+import Data.Maybe              ( fromMaybe  )
 import Data.Monoid             ( (<>), mempty )
 import Data.Ratio              ( Rational )
 import Data.String             ( String )
+import Data.Tuple              ( snd )
 import GHC.Stack               ( HasCallStack )
 import Numeric.Natural         ( Natural )
 import System.Environment      ( getProgName )
@@ -105,8 +92,10 @@ import Exited  ( Exited( Exited ), doMain', exitWith )
 
 -- more-unicode ------------------------
 
-import Data.MoreUnicode.Bool     ( 𝔹 )
+import Data.MoreUnicode.Bool     ( 𝔹, pattern 𝕿 )
+import Data.MoreUnicode.Either   ( 𝔼, pattern 𝕽, pattern 𝕷 )
 import Data.MoreUnicode.Functor  ( (⊳) )
+import Data.MoreUnicode.Maybe    ( 𝕄, pattern 𝕵, pattern 𝕹 )
 import Data.MoreUnicode.Monad    ( (≫) )
 
 -- mtl ---------------------------------
@@ -200,7 +189,7 @@ x ≣ y = ShowEqPrintable x === ShowEqPrintable y
 
 {- | Unconditionally signals success. -}
 assertSuccess ∷ Text → Assertion
-assertSuccess t = assertBool (toString t) True
+assertSuccess t = assertBool (toString t) 𝕿
 
 ----------------------------------------
 
@@ -209,13 +198,13 @@ assertSuccess t = assertBool (toString t) True
 runTests_ ∷ MonadIO μ ⇒ TastyOpts → μ TastyRunResult
 runTests_ (TastyOpts{..}) =
   liftIO $ case tryIngredients defaultIngredients optSet testTree of
-    Just run_tests → bool TestsFailed TestSuccess <$> run_tests
-    Nothing        → return TestRunFailure
+    𝕵 run_tests → bool TestsFailed TestSuccess ⊳ run_tests
+    𝕹        → return TestRunFailure
 
 {- | Run some tests, return exit code on failure (0 = success; 1 = some tests
      failed; 2 = failed to run). -}
 runTests ∷ MonadIO μ ⇒ TastyOpts → μ ExitCode
-runTests = (rrExitCode <$>) ∘ runTests_
+runTests = (rrExitCode ⊳) ∘ runTests_
 
 ----------------------------------------
 
@@ -227,7 +216,7 @@ runTestTree_ tree = runTests_ (TastyOpts tree mempty)
 
 {- | Run a test tree, with default options.  See `runTests` for exit codes. -}
 runTestTree ∷ MonadIO μ ⇒ TestTree → μ ExitCode
-runTestTree tree = rrExitCode <$> runTestTree_ tree
+runTestTree tree = rrExitCode ⊳ runTestTree_ tree
 
 ----------------------------------------
 
@@ -244,34 +233,34 @@ runTestsP_ ts "" =
   runTests_ (TastyOpts ts mempty)
 runTestsP_ ts pat =
   case parseTestPattern $ toString pat of
-    Just p  → runTests_ (TastyOpts ts (singleOption p))
-    Nothing → return TestSuccess
+    𝕵 p  → runTests_ (TastyOpts ts (singleOption p))
+    𝕹 → return TestSuccess
 
 ----------------------------------------
 
 {- | Run tests, with a given pattern (use "" to run everything). -}
 runTestsP ∷ (MonadIO μ) ⇒ TestTree → String → μ ExitCode
-runTestsP ts pat = rrExitCode <$> runTestsP_ ts pat
+runTestsP ts pat = rrExitCode ⊳ runTestsP_ ts pat
 
 ----------------------------------------
 
 runTestsReplay_ ∷ TestTree → String → Natural → IO TastyRunResult
 runTestsReplay_ ts s r = do
   let replayO ∷ Natural → OptionSet
-      replayO = singleOption ∘ QuickCheckReplay ∘ Just ∘ fromIntegral
-      tryOpt ∷ TestPattern → TestTree → Maybe (IO Bool)
+      replayO = singleOption ∘ QuickCheckReplay ∘ 𝕵 ∘ fromIntegral
+      tryOpt ∷ TestPattern → TestTree → 𝕄 (IO 𝔹)
       tryOpt p = tryIngredients defaultIngredients $
                      singleOption p ⊕ replayO r
 
   case parseTestPattern s of
-    Just p  → fromMaybe (return TestRunFailure) $
-                fmap (bool TestsFailed TestSuccess) <$> tryOpt p ts
-    Nothing → return TestRunFailure
+    𝕵 p  → fromMaybe (return TestRunFailure) $
+                fmap (bool TestsFailed TestSuccess) ⊳ tryOpt p ts
+    𝕹 → return TestRunFailure
 
 {- | Run some tests (matching a pattern) with a replay code.  Use "" to run
      all tests -}
 runTestsReplay ∷ TestTree → String → Natural → IO ExitCode
-runTestsReplay ts s r = rrExitCode <$> runTestsReplay_ ts s r
+runTestsReplay ts s r = rrExitCode ⊳ runTestsReplay_ ts s r
 
 ----------------------------------------
 
@@ -279,7 +268,7 @@ runTestsReplay ts s r = rrExitCode <$> runTestsReplay_ ts s r
 --   integration of tasty testing & options into an executable)
 optParser ∷ TestTree → Parser TastyOpts
 optParser testTree =
-  TastyOpts testTree <$> suiteOptionParser defaultIngredients testTree
+  TastyOpts testTree ⊳ snd (suiteOptionParser defaultIngredients testTree)
 
 -- | alternate name for client convenience
 tastyOptParser ∷ TestTree → Parser TastyOpts
@@ -301,11 +290,11 @@ mainTests desc ts = do
 ----------------------------------------
 
 assertCmp' ∷ HasCallStack ⇒
-             (α → Text) → (β → Text) → (α → β → 𝔹) → α → Maybe β → Assertion
-assertCmp' toTa _ _ expected Nothing =
+             (α → Text) → (β → Text) → (α → β → 𝔹) → α → 𝕄 β → Assertion
+assertCmp' toTa _ _ expected 𝕹 =
        assertFailure ("expected: " ⊕ toString (toTa expected)
                                    ⊕ "\nbut got Nothing")
-assertCmp' toTa toTb cmp expected (Just got) =
+assertCmp' toTa toTb cmp expected (𝕵 got) =
   let toSa = toString ∘ toTa
       toSb = toString ∘ toTb
    in -- equalize prefix lengths to make it easier to diff strings, etc.
@@ -402,7 +391,7 @@ assertListEq' toT name gotL expectL =
 
 -- | like `assertListEq`, but takes an Either which must be a Right
 assertListEqR ∷ (Foldable ψ, Foldable φ, Eq α, Printable α, Show ε) ⇒
-                 String → Either ε (ψ α) → (φ α) → [TestTree]
+                 String → 𝔼 ε (ψ α) → (φ α) → [TestTree]
 assertListEqR = assertListEqR' toText
 
 --------------------
@@ -411,38 +400,38 @@ assertListEqRTests ∷ TestTree
 assertListEqRTests =
   testGroup "assertListEq" $
     assertListEqR "listTestR"
-                  (Right [ "foo", "bar", "baz" ] ∷ Either String [String])
+                  (𝕽 [ "foo", "bar", "baz" ] ∷ 𝔼 String [String])
                   [ "foo", "bar", "baz" ]
 
 assertListEqRTestsF ∷ TestTree -- tests that should fail!
 assertListEqRTestsF =
   testGroup "assertListEq fail" $
-    assertListEqR "listTestR" (Left "weebles" ∷ Either String [String])
+    assertListEqR "listTestR" (𝕷 "weebles" ∷ 𝔼 String [String])
                               [ "foo", "bar", "baz" ]
 
 ----------------------------------------
 
 -- | like `assertListEq`, but takes an Either which must be a Right
 assertListEqR' ∷ (Foldable ψ, Foldable φ, Eq α, Show ε) ⇒
-                 (α → Text) → String → Either ε (ψ α) → φ α → [TestTree]
+                 (α → Text) → String → 𝔼 ε (ψ α) → φ α → [TestTree]
 assertListEqR' toT name got expect =
   case got of
-    Left  e → [testCase name (assertFailure ("got a Left: " <> show e))]
-    Right r → assertListEq' toT name r expect
+    𝕷  e → [testCase name (assertFailure ("got a Left: " <> show e))]
+    𝕽 r → assertListEq' toT name r expect
 
 ----------------------------------------
 
 assertListEqRS ∷ (Foldable ψ, Foldable φ, Eq α, Show ε, Show α) ⇒
-                  String → Either ε (ψ α) → φ α → [TestTree]
+                  String → 𝔼 ε (ψ α) → φ α → [TestTree]
 assertListEqRS = assertListEqR' (pack ∘ show)
 
 ----------------------------------------
 
 -- | test that we got a 'Right' value, satisfying the given assertion
-assertRight ∷ Show γ ⇒ (ρ → Assertion) → Either γ ρ → Assertion
+assertRight ∷ Show γ ⇒ (ρ → Assertion) → 𝔼 γ ρ → Assertion
 assertRight assertion got =
-  case got of Right g → assertion g
-              Left  e → assertFailure (show e)
+  case got of 𝕽 g → assertion g
+              𝕷  e → assertFailure (show e)
 
 --------------------
 
@@ -450,36 +439,36 @@ assertRightTests ∷ TestTree
 assertRightTests =
   testGroup "assertRight"
     [ testCase "right" $
-      assertRight ((@?= 4) ∘ length) (Right "good" ∷ Either Int String)
+      assertRight ((@?= 4) ∘ length) (𝕽 "good" ∷ 𝔼 Int String)
     ]
 
 assertRightTestsF0 ∷ TestTree
 assertRightTestsF0 =
   testGroup "assertRight fail (0)"
     [ testCase "right" $
-      assertRight ((@?= 4) ∘ length) (Left 7 ∷ Either Int String)
+      assertRight ((@?= 4) ∘ length) (𝕷 7 ∷ 𝔼 Int String)
     ]
 
 assertRightTestsF1 ∷ TestTree
 assertRightTestsF1 =
   testGroup "assertRight"
     [ testCase "right fail (1)" $
-      assertRight ((@?= 4) ∘ length) (Right "bad" ∷ Either Int String)
+      assertRight ((@?= 4) ∘ length) (𝕽 "bad" ∷ 𝔼 Int String)
     ]
 
 
 ----------------------------------------
 
 -- | test that we got a 'Left' value, satisfying the given assertion
-assertLeft ∷ Show ρ ⇒ (γ → Assertion) → Either γ ρ → Assertion
+assertLeft ∷ Show ρ ⇒ (γ → Assertion) → 𝔼 γ ρ → Assertion
 assertLeft assertion got =
-  case got of Right r → assertFailure (show r)
-              Left  l → assertion l
+  case got of 𝕽 r → assertFailure (show r)
+              𝕷 l → assertion l
 
 ----------------------------------------
 
 {- | Check that a value is a Left, but nothing more -}
-assertIsLeft ∷ Show β ⇒ Either α β → Assertion
+assertIsLeft ∷ Show β ⇒ 𝔼 α β → Assertion
 assertIsLeft = assertLeft (const $ assertSuccess "is Left")
 
 ----------------------------------------
@@ -489,10 +478,10 @@ assertIsLeft = assertLeft (const $ assertSuccess "is Left")
      to pass; no exception will cause it to fail.
  -}
 assertAnyException ∷ (NFData α) ⇒ String → α → IO ()
-assertAnyException n = assertException n (const True)
+assertAnyException n = assertException n (const 𝕿)
 
 assertAnyExceptionIO ∷ (NFData α) ⇒ String → IO α → IO ()
-assertAnyExceptionIO n = assertExceptionIO n (const True)
+assertAnyExceptionIO n = assertExceptionIO n (const 𝕿)
 
 {- | Check that an exception is thrown.  Any exception that is thrown is
      checked by the given predicate; the predicate pass to indicate that the
@@ -500,14 +489,14 @@ assertAnyExceptionIO n = assertExceptionIO n (const True)
      test itself, if it returns a value (without an exception) will pass; but
      note that being IO, it can itself run tests...
  -}
-assertException ∷ (NFData α) ⇒ String → (SomeException → Bool) → α → IO ()
+assertException ∷ (NFData α) ⇒ String → (SomeException → 𝔹) → α → IO ()
 assertException n p v = assertExceptionIO n p (return v)
 
-assertExceptionIO ∷ (NFData α) ⇒ String → (SomeException → Bool) → IO α → IO ()
+assertExceptionIO ∷ (NFData α) ⇒ String → (SomeException → 𝔹) → IO α → IO ()
 assertExceptionIO n p io =
-  handle (return ∘ Left) (Right <$> (io >>= evaluate ∘ force)) >>= \ case
-    Left e → assertBool n (p e)
-    Right _ → assertFailure ("no exception thrown: " ⊕ n)
+  handle (return ∘ 𝕷) (𝕽 ⊳ (io >>= evaluate ∘ force)) >>= \ case
+    𝕷 e → assertBool n (p e)
+    𝕽 _ → assertFailure ("no exception thrown: " ⊕ n)
 
 ----------------------------------------
 
@@ -556,7 +545,7 @@ assertEqTestsF =
  -}
 ioTests ∷ TestName → [(TestName, α → Assertion)] → IO α → TestTree
 ioTests name ts ioa =
-  testGroup name $ (\ (tname,t) → testCase tname $ ioa >>= t) <$> ts
+  testGroup name $ (\ (tname,t) → testCase tname $ ioa >>= t) ⊳ ts
 
 ----------------------------------------
 
@@ -628,7 +617,7 @@ instance Printable α ⇒ Printable (P (Parsed α)) where
   print (P (Malformed ss s)) =
     let quote     t  = "'" <> t <> "'"
         bracketsp t  = "[ " <> t <> " ]"
-        list    ts = bracketsp $ intercalate ", " (quote <$> ts)
+        list    ts = bracketsp $ intercalate ", " (quote ⊳ ts)
      in P.string $ "MALFORMED: " <> quote s <> " " <> list ss
 
 propInvertibleString ∷ (Eq α, Printable α, Textual α) ⇒ α → Property

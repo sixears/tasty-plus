@@ -84,7 +84,8 @@ import Control.DeepSeq  ( NFData, force )
 
 -- directory ---------------------------
 
-import System.Directory  ( getTemporaryDirectory, removePathForcibly )
+import System.Directory  ( getCurrentDirectory, getTemporaryDirectory
+                         , removePathForcibly, setCurrentDirectory )
 
 -- exited ------------------------------
 
@@ -96,7 +97,7 @@ import Data.MoreUnicode.Bool     ( 𝔹, pattern 𝕿 )
 import Data.MoreUnicode.Either   ( 𝔼, pattern 𝕽, pattern 𝕷 )
 import Data.MoreUnicode.Functor  ( (⊳) )
 import Data.MoreUnicode.Maybe    ( 𝕄, pattern 𝕵, pattern 𝕹 )
-import Data.MoreUnicode.Monad    ( (≫) )
+import Data.MoreUnicode.Monad    ( (⪼), (≫) )
 
 -- mtl ---------------------------------
 
@@ -577,8 +578,7 @@ withResource2' gain gain' ts =
 
      If acquisition fails, there should be nothing to release.
      But if setup fails, the release is called (though of course no tests are
-     run).
-     If the setup succeeds, tests are run, and cleanup is called.
+     run). If the setup succeeds, tests are run, and cleanup is called.
  -}
 withResourceCleanup ∷ IO α → (α → IO ()) → (α → IO ()) → (IO α → TestTree)
                     → TestTree
@@ -599,10 +599,22 @@ withResourceCleanup acquire setup release test =
      quirk).
  -}
 testInTempDir ∷ (FilePath → IO()) → (IO FilePath → TestTree) → TestTree
-testInTempDir setup =
+testInTempDir setup doTests =
   withResourceCleanup
-    (getTemporaryDirectory ≫ \ t → getProgName ≫ createTempDirectory t)
-    setup removePathForcibly
+    -- Create a temp dir; return the name of the cwd, and the tmpdir.
+    (do t ← getTemporaryDirectory
+        p ← getProgName
+        c ← getCurrentDirectory
+        d ← createTempDirectory t p
+        return (c,d))
+    -- cd and then run the setup; we do the cd here because we can't do it
+    -- before the createTempDirectory (since the dir won't exist), and we
+    -- don't want to do it after (since the cd might fail, and we don't clean
+    -- up on failure of acquisition; see `withResourceCleanup`.
+    (\ (_,d) → setCurrentDirectory d ⪼ setup d)
+    -- cd back to the original dir before we remove the temp dir
+    (\ (c,d) → setCurrentDirectory c ⪼ removePathForcibly d)
+    (\ io → doTests (snd ⊳ io))
 
 -- Common Properties ---------------------------------------
 

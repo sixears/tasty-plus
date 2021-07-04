@@ -1,3 +1,7 @@
+1.5.0.2 2021-07-03
+==================
+- fix testInTempDir to actually cd to tempdir as advertised
+
 1.5.0.1 2021-06-09
 ==================
 - use tasty >= 1.3 with amended suiteOptionParser typesig

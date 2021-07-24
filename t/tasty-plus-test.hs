@@ -19,7 +19,7 @@ import Options.Applicative.Extra    ( customExecParser, helper )
 --                     local imports                      --
 ------------------------------------------------------------
 
-import TastyPlus    ( runTests_, tastyOptParser, tests )
+import TastyPlus  ( runTests_, tastyOptParser, tests )
 
 -------------------------------------------------------------------------------
 

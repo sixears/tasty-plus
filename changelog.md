@@ -1,3 +1,7 @@
+1.5.1.0 2021-07-24
+==================
+- add assertJust, assertIsJust
+
 1.5.0.2 2021-07-03
 ==================
 - fix testInTempDir to actually cd to tempdir as advertised

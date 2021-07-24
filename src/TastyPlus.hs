@@ -15,7 +15,7 @@ module TastyPlus
   , assertCmp'
   , assertException, assertExceptionIO
   , assertIOError
-  , assertIsLeft, assertLeft, assertRight
+  , assertJust, assertIsJust, assertIsLeft, assertLeft, assertRight
   , assertListCmp, assertListCmpIO
   , assertListEq, assertListEqIO, assertListEqIO'
   , assertListEq', assertListEqR, assertListEqR', assertListEqRS
@@ -43,11 +43,12 @@ import Prelude  ( (*), fromIntegral )
 -- base --------------------------------
 
 import Control.Applicative     ( (<*>) )
-import Control.Exception       ( SomeException, evaluate, handle, onException )
+import Control.Exception       ( Exception, SomeException
+                               , evaluate, handle, onException )
 import Control.Monad           ( (>>=), return )
 import Control.Monad.IO.Class  ( MonadIO, liftIO )
 import Data.Bool               ( bool )
-import Data.Eq                 ( Eq )
+import Data.Eq                 ( Eq( (==) ) )
 import Data.Foldable           ( Foldable, concatMap, length, toList )
 import Data.Function           ( ($), const, flip )
 import Data.Functor            ( fmap )
@@ -56,9 +57,9 @@ import Data.List               ( intercalate, zip, zipWith3 )
 import Data.Maybe              ( fromMaybe  )
 import Data.Monoid             ( (<>), mempty )
 import Data.Ratio              ( Rational )
-import Data.String             ( String )
 import Data.Tuple              ( snd )
-import GHC.Stack               ( HasCallStack )
+import GHC.Generics            ( Generic )
+import GHC.Stack               ( CallStack, HasCallStack, callStack )
 import Numeric.Natural         ( Natural )
 import System.Environment      ( getProgName )
 import System.Exit             ( ExitCode( ExitFailure, ExitSuccess ) )
@@ -98,10 +99,11 @@ import Data.MoreUnicode.Either   ( 𝔼, pattern 𝕽, pattern 𝕷 )
 import Data.MoreUnicode.Functor  ( (⊳) )
 import Data.MoreUnicode.Maybe    ( 𝕄, pattern 𝕵, pattern 𝕹 )
 import Data.MoreUnicode.Monad    ( (⪼), (≫) )
+import Data.MoreUnicode.String   ( 𝕊 )
 
 -- mtl ---------------------------------
 
-import Control.Monad.Except  ( ExceptT, runExceptT )
+import Control.Monad.Except  ( ExceptT, MonadError, runExceptT, throwError )
 
 -- optparse-applicative ----------------
 
@@ -146,6 +148,26 @@ import Data.Text  ( Text, pack )
 import qualified  Text.Printer  as  P
 
 -------------------------------------------------------------------------------
+
+{- | An exception for testing with, including NFData & CallStack. -}
+data AnException = AnException 𝕊 CallStack
+  deriving (Generic,NFData,Show)
+
+instance Exception AnException
+
+instance Eq AnException where
+  AnException s _ == AnException s' _ = s == s'
+
+anException ∷ HasCallStack ⇒ 𝕊 → AnException
+anException s = AnException s callStack
+
+throwE ∷ MonadError AnException η ⇒ 𝕊 → η ()
+throwE s = throwError $ anException s
+
+st ∷ AnException → 𝕊
+st (AnException s _) = s
+
+------------------------------------------------------------
 
 -- | we need to provide a test tree to the optparser, anrd also to runTests;
 --   to ensure consistency we encompass them in a single TastyOpts datum
@@ -229,7 +251,7 @@ runTestTree' = doMain' ∘ runTestTree
 ----------------------------------------
 
 {- | Run tests, with a given pattern (use "" to run everything). -}
-runTestsP_ ∷ (MonadIO μ) ⇒ TestTree → String → μ TastyRunResult
+runTestsP_ ∷ (MonadIO μ) ⇒ TestTree → 𝕊 → μ TastyRunResult
 runTestsP_ ts "" =
   runTests_ (TastyOpts ts mempty)
 runTestsP_ ts pat =
@@ -240,12 +262,12 @@ runTestsP_ ts pat =
 ----------------------------------------
 
 {- | Run tests, with a given pattern (use "" to run everything). -}
-runTestsP ∷ (MonadIO μ) ⇒ TestTree → String → μ ExitCode
+runTestsP ∷ (MonadIO μ) ⇒ TestTree → 𝕊 → μ ExitCode
 runTestsP ts pat = rrExitCode ⊳ runTestsP_ ts pat
 
 ----------------------------------------
 
-runTestsReplay_ ∷ TestTree → String → Natural → IO TastyRunResult
+runTestsReplay_ ∷ TestTree → 𝕊 → Natural → IO TastyRunResult
 runTestsReplay_ ts s r = do
   let replayO ∷ Natural → OptionSet
       replayO = singleOption ∘ QuickCheckReplay ∘ 𝕵 ∘ fromIntegral
@@ -260,7 +282,7 @@ runTestsReplay_ ts s r = do
 
 {- | Run some tests (matching a pattern) with a replay code.  Use "" to run
      all tests -}
-runTestsReplay ∷ TestTree → String → Natural → IO ExitCode
+runTestsReplay ∷ TestTree → 𝕊 → Natural → IO ExitCode
 runTestsReplay ts s r = rrExitCode ⊳ runTestsReplay_ ts s r
 
 ----------------------------------------
@@ -278,7 +300,7 @@ tastyOptParser = optParser
 ----------------------------------------
 
 {- | Wrapper for tests as main, e.g., in t/*.hs . -}
-mainTests ∷ MonadIO μ ⇒ String → TestTree → μ ()
+mainTests ∷ MonadIO μ ⇒ 𝕊 → TestTree → μ ()
 mainTests desc ts = do
   tastyOpts ← liftIO $
               customExecParser (prefs showHelpOnError) $
@@ -350,7 +372,7 @@ assertListEq name expect got = assertListEqIO name expect (return got)
 
 assertListEqTests ∷ TestTree
 assertListEqTests =
-  assertListEq "listTest" [ "foo", "bar", "baz" ∷ String ]
+  assertListEq "listTest" [ "foo", "bar", "baz" ∷ 𝕊 ]
                           [ "foo", "bar", "baz" ]
 
 assertListEqTestsF ∷ TestTree
@@ -361,21 +383,21 @@ assertListEqTestsF =
     , assertListEq "listTest>" [ "foo", "bar", "baz" ]
                                [ "foo", "bar" ∷ Text ]
     , assertListEq "listTest!" [ "foo", "bar", "baz" ]
-                               [ "foo", "rab", "baz" ∷ String ]
+                               [ "foo", "rab", "baz" ∷ 𝕊 ]
     ]
 
 ----------------------------------------
 
 -- | like `assertListEq`, but using Show rather than Printable
 assertListEqS ∷ (Foldable ψ, Foldable φ, Eq α, Show α) ⇒
-                 String → ψ α → φ α → [TestTree]
+                 𝕊 → ψ α → φ α → [TestTree]
 assertListEqS = assertListEq' (pack ∘ show)
 
 ----------------------------------------
 
 -- | compare two lists for equality, with itemized testing
 assertListEq' ∷ (Foldable ψ, Foldable φ, Eq α) ⇒
-                (α → Text) → String → ψ α → φ α → [TestTree]
+                (α → Text) → 𝕊 → ψ α → φ α → [TestTree]
 assertListEq' toT name gotL expectL =
   let got    = toList gotL
       expect = toList expectL
@@ -392,7 +414,7 @@ assertListEq' toT name gotL expectL =
 
 -- | like `assertListEq`, but takes an Either which must be a Right
 assertListEqR ∷ (Foldable ψ, Foldable φ, Eq α, Printable α, Show ε) ⇒
-                 String → 𝔼 ε (ψ α) → (φ α) → [TestTree]
+                 𝕊 → 𝔼 ε (ψ α) → (φ α) → [TestTree]
 assertListEqR = assertListEqR' toText
 
 --------------------
@@ -401,20 +423,20 @@ assertListEqRTests ∷ TestTree
 assertListEqRTests =
   testGroup "assertListEq" $
     assertListEqR "listTestR"
-                  (𝕽 [ "foo", "bar", "baz" ] ∷ 𝔼 String [String])
+                  (𝕽 [ "foo", "bar", "baz" ] ∷ 𝔼 𝕊 [𝕊])
                   [ "foo", "bar", "baz" ]
 
 assertListEqRTestsF ∷ TestTree -- tests that should fail!
 assertListEqRTestsF =
   testGroup "assertListEq fail" $
-    assertListEqR "listTestR" (𝕷 "weebles" ∷ 𝔼 String [String])
+    assertListEqR "listTestR" (𝕷 "weebles" ∷ 𝔼 𝕊 [𝕊])
                               [ "foo", "bar", "baz" ]
 
 ----------------------------------------
 
 -- | like `assertListEq`, but takes an Either which must be a Right
 assertListEqR' ∷ (Foldable ψ, Foldable φ, Eq α, Show ε) ⇒
-                 (α → Text) → String → 𝔼 ε (ψ α) → φ α → [TestTree]
+                 (α → Text) → 𝕊 → 𝔼 ε (ψ α) → φ α → [TestTree]
 assertListEqR' toT name got expect =
   case got of
     𝕷  e → [testCase name (assertFailure ("got a Left: " <> show e))]
@@ -423,7 +445,7 @@ assertListEqR' toT name got expect =
 ----------------------------------------
 
 assertListEqRS ∷ (Foldable ψ, Foldable φ, Eq α, Show ε, Show α) ⇒
-                  String → 𝔼 ε (ψ α) → φ α → [TestTree]
+                  𝕊 → 𝔼 ε (ψ α) → φ α → [TestTree]
 assertListEqRS = assertListEqR' (pack ∘ show)
 
 ----------------------------------------
@@ -440,27 +462,27 @@ assertRightTests ∷ TestTree
 assertRightTests =
   testGroup "assertRight"
     [ testCase "right" $
-      assertRight ((@?= 4) ∘ length) (𝕽 "good" ∷ 𝔼 Int String)
+      assertRight ((@?= 4) ∘ length) (𝕽 "good" ∷ 𝔼 Int 𝕊)
     ]
 
 assertRightTestsF0 ∷ TestTree
 assertRightTestsF0 =
   testGroup "assertRight fail (0)"
     [ testCase "right" $
-      assertRight ((@?= 4) ∘ length) (𝕷 7 ∷ 𝔼 Int String)
+      assertRight ((@?= 4) ∘ length) (𝕷 7 ∷ 𝔼 Int 𝕊)
     ]
 
 assertRightTestsF1 ∷ TestTree
 assertRightTestsF1 =
   testGroup "assertRight"
     [ testCase "right fail (1)" $
-      assertRight ((@?= 4) ∘ length) (𝕽 "bad" ∷ 𝔼 Int String)
+      assertRight ((@?= 4) ∘ length) (𝕽 "bad" ∷ 𝔼 Int 𝕊)
     ]
 
 
 ----------------------------------------
 
--- | test that we got a 'Left' value, satisfying the given assertion
+{- | Test that we got a 'Left' value, satisfying the given assertion. -}
 assertLeft ∷ Show ρ ⇒ (γ → Assertion) → 𝔼 γ ρ → Assertion
 assertLeft assertion got =
   case got of 𝕽 r → assertFailure (show r)
@@ -468,21 +490,33 @@ assertLeft assertion got =
 
 ----------------------------------------
 
-{- | Check that a value is a Left, but nothing more -}
+{- | Merely check that a value is a Left <something>. -}
 assertIsLeft ∷ Show β ⇒ 𝔼 α β → Assertion
 assertIsLeft = assertLeft (const $ assertSuccess "is Left")
 
 ----------------------------------------
 
+{- | Test that we got a 'Just' value, satisfying the given assertion. -}
+assertJust ∷ (γ → Assertion) → 𝕄 γ → Assertion
+assertJust assertion got =
+  case got of 𝕹 → assertFailure "got Nothing"
+              𝕵 x → assertion x
 
-{- | Check that any exception is thrown.  Any exception will cause the test
-     to pass; no exception will cause it to fail.
- -}
-assertAnyException ∷ (NFData α) ⇒ String → α → IO ()
-assertAnyException n = assertException n (const 𝕿)
+----------------------------------------
 
-assertAnyExceptionIO ∷ (NFData α) ⇒ String → IO α → IO ()
-assertAnyExceptionIO n = assertExceptionIO n (const 𝕿)
+{- | Merely check that a value is a Just <something>. -}
+assertIsJust ∷ 𝕄 α → Assertion
+assertIsJust = assertJust (const $ assertSuccess "is Just")
+
+----------------------------------------
+
+{- | Note that this is to check errors thrown within IO; use `assertIOError` to
+     check for `MonadError`/`ExceptT ε IO` errors. -}
+assertExceptionIO ∷ (NFData α) ⇒ 𝕊 → (SomeException → 𝔹) → IO α → IO ()
+assertExceptionIO n p io =
+  handle (return ∘ 𝕷) (𝕽 ⊳ (io >>= evaluate ∘ force)) >>= \ case
+    𝕷 e → assertBool n (p e)
+    𝕽 _ → assertFailure ("no exception thrown: " ⊕ n)
 
 {- | Check that an exception is thrown.  Any exception that is thrown is
      checked by the given predicate; the predicate pass to indicate that the
@@ -490,19 +524,38 @@ assertAnyExceptionIO n = assertExceptionIO n (const 𝕿)
      test itself, if it returns a value (without an exception) will pass; but
      note that being IO, it can itself run tests...
  -}
-assertException ∷ (NFData α) ⇒ String → (SomeException → 𝔹) → α → IO ()
+assertException ∷ (NFData α) ⇒ 𝕊 → (SomeException → 𝔹) → α → IO ()
 assertException n p v = assertExceptionIO n p (return v)
 
-assertExceptionIO ∷ (NFData α) ⇒ String → (SomeException → 𝔹) → IO α → IO ()
-assertExceptionIO n p io =
-  handle (return ∘ 𝕷) (𝕽 ⊳ (io >>= evaluate ∘ force)) >>= \ case
-    𝕷 e → assertBool n (p e)
-    𝕽 _ → assertFailure ("no exception thrown: " ⊕ n)
+{- | Check that some (any) exception is thrown.  Any exception will cause the
+     test to pass; no exception will cause it to fail.
+ -}
+assertAnyException ∷ (NFData α) ⇒ 𝕊 → α → IO ()
+assertAnyException n = assertException n (const 𝕿)
+
+assertAnyExceptionIO ∷ (NFData α) ⇒ 𝕊 → IO α → IO ()
+assertAnyExceptionIO n = assertExceptionIO n (const 𝕿)
 
 ----------------------------------------
 
+{- | Test that an ExceptT IO throws an expected error. -}
 assertIOError ∷ Show ρ ⇒ (ε → Assertion) → ExceptT ε IO ρ → Assertion
 assertIOError p io = (runExceptT io) >>= assertLeft p
+
+assertIOErrorTests ∷ TestTree
+assertIOErrorTests =
+  testCase "assertIOError" $ assertIOError (\ e → "z" ≟ st e) $ throwE "z"
+
+-- these tests should fail
+assertIOErrorTestsF ∷ TestTree
+assertIOErrorTestsF =
+  testGroup "assertIOError - fail"
+    [ -- prefix test name with '!' to indicate that it should fail
+      testCase "wrong exception" $
+        assertIOError (\ e → "y" ≟ st e) $ throwE "z"
+    , testCase "no exception" $
+        assertIOError (\ _ → assertBool "const" 𝕿) $ return ()
+    ]
 
 ----------------------------------------
 
@@ -532,7 +585,7 @@ assertEq = assertEq' toText
 
 assertEqTests ∷ TestTree
 assertEqTests =
-  testGroup "assertEq" [ testCase "foo" $ "foo" #=? ("foo" ∷ String) ]
+  testGroup "assertEq" [ testCase "foo" $ "foo" #=? ("foo" ∷ 𝕊) ]
 
 assertEqTestsF ∷ TestTree
 assertEqTestsF =
@@ -655,18 +708,6 @@ _test0 = -- test that runTestsP correctly selects only the working tests
 _test1 ∷ IO TastyRunResult
 _test1 = runTestsP_ tests "normal"
 
-_test ∷ IO ()
-_test = do
-  TestSuccess ← _test0
-  TestSuccess ← _test1
---  TestSuccess ← runTestTree _failTests
-  return ()
-
-_ftest ∷ IO ()
-_ftest = do
-  TestSuccess ← runTestTree_ _failTests
-  return ()
-
 ----------------------------------------
 
 {- | Simple tests, with a failure, to allow for a pattern to select only the
@@ -674,28 +715,25 @@ _ftest = do
 -}
 
 mkSimpleTests ∷ Foldable t ⇒
-                t ((String → Int → Int → TestTree) → [TestTree]) → TestTree
+                t ((𝕊 → Int → Int → TestTree) → [TestTree]) → TestTree
 mkSimpleTests ts =
-  let tC ∷ String → Int → Int → TestTree
+  let tC ∷ 𝕊 → Int → Int → TestTree
       tC name got expect = testCase name $ got @?= expect
    in testGroup "simple" $ concatMap ($ tC) ts
 
 ----------------------------------------
 
-simpleTestsS ∷ (String → Int → Int → TestTree) → [TestTree]
+simpleTestsS ∷ (𝕊 → Int → Int → TestTree) → [TestTree]
 simpleTestsS tC = [ tC "two" 2 2, tC "three" 3 3 ]
 
 ----------------------------------------
 
-simpleTestsF ∷ (String → Int → Int → TestTree) → [TestTree]
+simpleTestsF ∷ (𝕊 → Int → Int → TestTree) → [TestTree]
 simpleTestsF tC = [ tC "one" 1 2 {- deliberate fail -} ]
 
 
 
 ----------------------------------------
-
-tests ∷ TestTree
-tests = testGroup "tests" [ unitTests, pTests, propTests ]
 
 unitTests ∷ TestTree
 unitTests = testGroup "unitTests" [ hunitGroup ]
@@ -709,6 +747,7 @@ normalTests = testGroup "normal" [ assertEqTests
                                  , assertListEqRTests
                                  , assertListEqTests
                                  , assertRightTests
+                                 , assertIOErrorTests
                                  ]
 
 _failTests ∷ TestTree
@@ -721,6 +760,7 @@ _failTests =
                  , failIt "assertRightTestsF1"  assertRightTestsF1
                  , failIt "assertListEqTestsF"  assertListEqTestsF
                  , failIt "assertListEqRTestsF" assertListEqRTestsF
+                 , failIt "assertIOErrorTestsF" assertIOErrorTestsF
                  ]
 
 pTests ∷ TestTree
@@ -728,11 +768,11 @@ pTests =
   testGroup "P.normal"
             [ testCase "malformed (0)" $
                   "MALFORMED: 'foo'"
-                ≟ toString (P $ Malformed @String [] "foo")
+                ≟ toString (P $ Malformed @𝕊 [] "foo")
             , testCase "malformed (1)" $
                   "MALFORMED: 'foo' [ 'a', 'b', 'c' ]"
-                ≟ toString (P $ Malformed @String ["a","b","c"] "foo")
-            , testCase "parsed" $ "bar" ≟ toString (P $ Parsed @String "bar")
+                ≟ toString (P $ Malformed @𝕊 ["a","b","c"] "foo")
+            , testCase "parsed" $ "bar" ≟ toString (P $ Parsed @𝕊 "bar")
             ]
 
 propTests ∷ TestTree
@@ -746,5 +786,19 @@ propTests =
             , testGroup "Rational - Associative"
                         [ testProperty "*" (propAssociative @Rational (*))]
             ]
+
+_test ∷ IO ()
+_test = do
+  TestSuccess ← _test0
+  TestSuccess ← _test1
+  return ()
+
+_ftest ∷ IO ()
+_ftest = do
+  TestSuccess ← runTestTree_ _failTests
+  return ()
+
+tests ∷ TestTree
+tests = testGroup "tests" [ unitTests, pTests, propTests ]
 
 -- that's all, folks! ----------------------------------------------------------

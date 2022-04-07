@@ -562,7 +562,8 @@ assertIOErrorTestsF =
 assertEq' ∷ (Eq t) ⇒ (t → Text) → t → t → Assertion
 assertEq' toT e e' =
   let toS = toString ∘ toT
-   in assertBool ("expected: " ⊕ toS e' ⊕ "\nbut got: " ⊕ toS e) (e ≡ e')
+      -- extra space in 'but got ' to align with 'expected'
+   in assertBool ("expected: " ⊕ toS e' ⊕ "\nbut got : " ⊕ toS e) (e ≡ e')
 
 -- | a bit like `assertEqual`, but generates its own message based on `toText`
 --   of the arguments (because that may be more readable than show).

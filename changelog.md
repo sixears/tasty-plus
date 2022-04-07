@@ -1,3 +1,7 @@
+1.5.1.1 2022-04-07
+==================
+- upgrade dependencies
+
 1.5.1.0 2021-07-24
 ==================
 - add assertJust, assertIsJust

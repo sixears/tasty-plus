@@ -1,3 +1,7 @@
+1.5.2.0 2022-10-07
+==================
+- add TestCmp, lits, litt, shrinkList, shrinkText
+
 1.5.1.1 2022-04-07
 ==================
 - upgrade dependencies

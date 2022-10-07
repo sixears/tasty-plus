@@ -5,8 +5,7 @@ Description: utility functions for working with Tasty testing
 -}
 
 module TastyPlus
-  ( TastyOpts( TastyOpts ), TastyRunResult(..)
-
+  ( TastyOpts( TastyOpts ), TastyRunResult(..), TestCmp(..)
   , (#?=), (#=?), (≣), (≟)
 
   , optParser, tastyOptParser
@@ -21,6 +20,8 @@ module TastyPlus
   , assertListEq', assertListEqR, assertListEqR', assertListEqRS
   , assertListEqS
   , assertSuccess
+
+  , lits, litt, shrinkList, shrinkText
 
   , ioTests, mainTests
 
@@ -42,22 +43,23 @@ import Prelude  ( (*), fromIntegral )
 
 -- base --------------------------------
 
-import Control.Applicative     ( (<*>) )
 import Control.Exception       ( Exception, SomeException
                                , evaluate, handle, onException )
-import Control.Monad           ( (>>=), return )
+import Control.Monad           ( return )
 import Control.Monad.IO.Class  ( MonadIO, liftIO )
 import Data.Bool               ( bool )
+import Data.Char               ( showLitChar )
 import Data.Eq                 ( Eq( (==) ) )
-import Data.Foldable           ( Foldable, concatMap, length, toList )
+import Data.Foldable           ( Foldable, concatMap, length, foldr', toList )
 import Data.Function           ( ($), const, flip )
 import Data.Functor            ( fmap )
 import Data.Int                ( Int )
-import Data.List               ( intercalate, zip, zipWith3 )
+import Data.List               ( inits, init, intercalate, tail, tails
+                               , zip, zipWith3 )
 import Data.Maybe              ( fromMaybe  )
-import Data.Monoid             ( (<>), mempty )
+import Data.Monoid             ( mempty )
 import Data.Ratio              ( Rational )
-import Data.Tuple              ( snd )
+import Data.Tuple              ( snd, uncurry )
 import GHC.Generics            ( Generic )
 import GHC.Stack               ( CallStack, HasCallStack, callStack )
 import Numeric.Natural         ( Natural )
@@ -94,12 +96,13 @@ import Exited  ( Exited( Exited ), doMain', exitWith )
 
 -- more-unicode ------------------------
 
-import Data.MoreUnicode.Bool     ( 𝔹, pattern 𝕿 )
-import Data.MoreUnicode.Either   ( 𝔼, pattern 𝕽, pattern 𝕷 )
-import Data.MoreUnicode.Functor  ( (⊳) )
-import Data.MoreUnicode.Maybe    ( 𝕄, pattern 𝕵, pattern 𝕹 )
-import Data.MoreUnicode.Monad    ( (⪼), (≫) )
-import Data.MoreUnicode.String   ( 𝕊 )
+import Data.MoreUnicode.Applicative  ( (⊵) )
+import Data.MoreUnicode.Bool         ( 𝔹, pattern 𝕿 )
+import Data.MoreUnicode.Either       ( 𝔼, pattern 𝕽, pattern 𝕷 )
+import Data.MoreUnicode.Functor      ( (⊳) )
+import Data.MoreUnicode.Maybe        ( 𝕄, pattern 𝕵, pattern 𝕹 )
+import Data.MoreUnicode.Monad        ( (⪼), (≫) )
+import Data.MoreUnicode.String       ( 𝕊 )
 
 -- mtl ---------------------------------
 
@@ -141,7 +144,8 @@ import System.IO.Temp  ( createTempDirectory )
 
 -- text --------------------------------
 
-import Data.Text  ( Text, pack )
+import qualified  Data.Text  as  Text
+import Data.Text  ( Text, pack, unpack )
 
 -- text-printer ------------------------
 
@@ -166,6 +170,13 @@ throwE s = throwError $ anException s
 
 st ∷ AnException → 𝕊
 st (AnException s _) = s
+
+------------------------------------------------------------
+
+{-| Class for datatypes that provide their own comparative tests; to make
+    recursive tests easier to write. -}
+class TestCmp α where
+  testCmp ∷ HasCallStack ⇒ TestName → α → α → TestTree
 
 ------------------------------------------------------------
 
@@ -198,20 +209,20 @@ instance Printable α ⇒ Show (ShowEqPrintable α) where
      application.
  -}
 infix 1 ≟
-(≟) ∷ (Eq α, Printable α) ⇒ α → α → Assertion
+(≟) ∷ (Eq α, Printable α,HasCallStack) ⇒ α → α → Assertion
 x ≟ y = ShowEqPrintable x @=? ShowEqPrintable y
 
 ----------------------------------------
 
 {- | Almost-synonym for `===`, but using `Printable` instead of `Show`. -}
 infix 4 ≣
-(≣) ∷ (Eq α, Printable α) ⇒ α → α → Property
+(≣) ∷ (Eq α, Printable α, HasCallStack) ⇒ α → α → Property
 x ≣ y = ShowEqPrintable x === ShowEqPrintable y
 
 ----------------------------------------
 
 {- | Unconditionally signals success. -}
-assertSuccess ∷ Text → Assertion
+assertSuccess ∷ HasCallStack ⇒ Text → Assertion
 assertSuccess t = assertBool (toString t) 𝕿
 
 ----------------------------------------
@@ -304,10 +315,10 @@ mainTests ∷ MonadIO μ ⇒ 𝕊 → TestTree → μ ()
 mainTests desc ts = do
   tastyOpts ← liftIO $
               customExecParser (prefs showHelpOnError) $
-                info (helper <*> tastyOptParser ts)
+                info (helper ⊵ tastyOptParser ts)
                      (fullDesc ⊕ progDesc desc ⊕ failureCode 254)
 
-  Exited ← runTests tastyOpts >>= exitWith
+  Exited ← runTests tastyOpts ≫ exitWith
   return ()
 
 ----------------------------------------
@@ -405,9 +416,9 @@ assertListEq' toT name gotL expectL =
         assertBool ("length " ⊕ show g ⊕ " did not match expected " ⊕ show e)
                    (e ≡ g)
       lengthCheck g e = lCheck (length g) (length e)
-      assertItem gt exp i = let nm = name <> ": " <> show i
+      assertItem gt exp i = let nm = name ⊕ ": " ⊕ show i
                              in testCase nm $ assertEq' toT gt exp
-   in   testCase (name <> ": count") (lengthCheck got expect)
+   in   testCase (name ⊕ ": count") (lengthCheck got expect)
       : zipWith3 assertItem got expect [1 ∷ Int ..]
 
 ----------------------------------------
@@ -439,7 +450,7 @@ assertListEqR' ∷ (Foldable ψ, Foldable φ, Eq α, Show ε) ⇒
                  (α → Text) → 𝕊 → 𝔼 ε (ψ α) → φ α → [TestTree]
 assertListEqR' toT name got expect =
   case got of
-    𝕷  e → [testCase name (assertFailure ("got a Left: " <> show e))]
+    𝕷  e → [testCase name (assertFailure ("got a Left: " ⊕ show e))]
     𝕽 r → assertListEq' toT name r expect
 
 ----------------------------------------
@@ -514,7 +525,7 @@ assertIsJust = assertJust (const $ assertSuccess "is Just")
      check for `MonadError`/`ExceptT ε IO` errors. -}
 assertExceptionIO ∷ (NFData α) ⇒ 𝕊 → (SomeException → 𝔹) → IO α → IO ()
 assertExceptionIO n p io =
-  handle (return ∘ 𝕷) (𝕽 ⊳ (io >>= evaluate ∘ force)) >>= \ case
+  handle (return ∘ 𝕷) (𝕽 ⊳ (io ≫ evaluate ∘ force)) ≫ \ case
     𝕷 e → assertBool n (p e)
     𝕽 _ → assertFailure ("no exception thrown: " ⊕ n)
 
@@ -540,7 +551,7 @@ assertAnyExceptionIO n = assertExceptionIO n (const 𝕿)
 
 {- | Test that an ExceptT IO throws an expected error. -}
 assertIOError ∷ Show ρ ⇒ (ε → Assertion) → ExceptT ε IO ρ → Assertion
-assertIOError p io = (runExceptT io) >>= assertLeft p
+assertIOError p io = (runExceptT io) ≫ assertLeft p
 
 assertIOErrorTests ∷ TestTree
 assertIOErrorTests =
@@ -600,7 +611,7 @@ assertEqTestsF =
  -}
 ioTests ∷ TestName → [(TestName, α → Assertion)] → IO α → TestTree
 ioTests name ts ioa =
-  testGroup name $ (\ (tname,t) → testCase tname $ ioa >>= t) ⊳ ts
+  testGroup name $ (\ (tname,t) → testCase tname $ ioa ≫ t) ⊳ ts
 
 ----------------------------------------
 
@@ -678,13 +689,13 @@ newtype P α = P α
 instance Printable α ⇒ Printable (P (Parsed α)) where
   print (P (Parsed a))       = P.string (toString a)
   print (P (Malformed [] s)) =
-    let quote t = "'" <> t <> "'"
-     in P.string $ "MALFORMED: " <> quote s
+    let quote t = "'" ⊕ t ⊕ "'"
+     in P.string $ "MALFORMED: " ⊕ quote s
   print (P (Malformed ss s)) =
-    let quote     t  = "'" <> t <> "'"
-        bracketsp t  = "[ " <> t <> " ]"
+    let quote     t  = "'" ⊕ t ⊕ "'"
+        bracketsp t  = "[ " ⊕ t ⊕ " ]"
         list    ts = bracketsp $ intercalate ", " (quote ⊳ ts)
-     in P.string $ "MALFORMED: " <> quote s <> " " <> list ss
+     in P.string $ "MALFORMED: " ⊕ quote s ⊕ " " ⊕ list ss
 
 propInvertibleString ∷ (Eq α, Printable α, Textual α) ⇒ α → Property
 propInvertibleString d = P (parseString (toString d)) ≣ P (Parsed d)
@@ -732,7 +743,32 @@ simpleTestsS tC = [ tC "two" 2 2, tC "three" 3 3 ]
 simpleTestsF ∷ (𝕊 → Int → Int → TestTree) → [TestTree]
 simpleTestsF tC = [ tC "one" 1 2 {- deliberate fail -} ]
 
+----------------------------------------
 
+{-| Shrink a list @xs@ by generating all the sublists that are @xs@ with one
+    element removed -}
+shrinkList ∷ [α] → [[α]]
+shrinkList s =
+    uncurry (⊕) ⊳ zip (init $ inits s) (tail $ tails s)
+
+{-| Shrink a string @s@ by generating all the substrings that are @s@ with one
+    character removed -}
+shrinkText ∷ Text → [Text]
+shrinkText s =
+    uncurry (⊕) ⊳ zip (init $ Text.inits s) (tail $ Text.tails s)
+
+----------------------------------------
+
+{-| Convert a string to its representation as printable chars, i.e., converting
+    e.g., newline to "\\n", etc. -}
+lits ∷ 𝕊 → 𝕊
+-- use foldr' to be strict, avoiding a space leak
+lits s = foldr' ($) "" (showLitChar ⊳ s)
+
+{-| Convert a `Text` to its representation as printable chars, i.e., converting
+    e.g., newline to "\\n", etc. -}
+litt ∷ Text → Text
+litt = pack ∘ lits ∘ unpack
 
 ----------------------------------------
 
@@ -753,7 +789,7 @@ normalTests = testGroup "normal" [ assertEqTests
 
 _failTests ∷ TestTree
 _failTests =
-  let failIt name tree = testCase name $ runTestTree_ tree >>= (@?= TestsFailed)
+  let failIt name tree = testCase name $ runTestTree_ tree ≫ (@?= TestsFailed)
    in testGroup "fail"
                  [ failIt "simpleTests"         (mkSimpleTests [simpleTestsF])
                  , failIt "assertEq"            assertEqTestsF

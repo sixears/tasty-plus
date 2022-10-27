@@ -1,3 +1,8 @@
+1.5.2.1 2022-10-27
+==================
+- add flake
+- use ghc-8.10.7 for tfmt
+
 1.5.2.0 2022-10-07
 ==================
 - add TestCmp, lits, litt, shrinkList, shrinkText

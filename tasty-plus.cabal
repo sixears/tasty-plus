@@ -7,7 +7,7 @@ name:                tasty-plus
 -- PVP summary:      +-+------- breaking API changes
 --                   | | +----- non-breaking API additions
 --                   | | | +--- code changes with no API change
-version:             1.5.2.1
+version:             1.5.2.2
 
 -- A short (one-line) description of the package.
 synopsis:            Additional utilities for working with Tasty

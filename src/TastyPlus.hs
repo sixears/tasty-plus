@@ -606,8 +606,7 @@ assertEqTestsF =
 ----------------------------------------
 
 {- | Construct a test group, wherein each test is passed a value that has been
-     pre-initialized in some IO.  Note that the IO is not run for each test, it
-     is run no more than once (and that, of course, only if the tests are run).
+     pre-initialized in some IO.  Note that the IO is re-run for each test.
  -}
 ioTests ∷ TestName → [(TestName, α → Assertion)] → IO α → TestTree
 ioTests name ts ioa =

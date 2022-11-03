@@ -9,7 +9,7 @@
     more-unicode.url  = "github:sixears/more-unicode/r0.0.17.5";
   };
 
-  outputs = { self, nixpkgs, flake-utils, build-utils
+  outputs = { self, nixpkgs, build-utils
             , exited, more-unicode }:
     build-utils.lib.hOutputs self nixpkgs "tasty-plus" {
       deps = {

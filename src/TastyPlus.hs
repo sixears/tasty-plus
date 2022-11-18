@@ -176,7 +176,7 @@ st (AnException s _) = s
 {-| Class for datatypes that provide their own comparative tests; to make
     recursive tests easier to write. -}
 class TestCmp α where
-  testCmp ∷ HasCallStack ⇒ TestName → α → α → TestTree
+  testCmp ∷ HasCallStack ⇒ TestName → α → IO α → TestTree
 
 ------------------------------------------------------------
 
@@ -614,7 +614,8 @@ ioTests name ts ioa =
 
 ----------------------------------------
 
-{- | like `withResource`, but with a no-op release resource -}
+{- | like `withResource`, but with a no-op release resource.  Note that unlike
+     `ioTests`; the IO is only run once. -}
 withResource' ∷ IO α → (IO α → TestTree) → TestTree
 withResource' = flip withResource (const $ return ())
 

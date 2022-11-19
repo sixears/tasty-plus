@@ -14,7 +14,7 @@
     build-utils.lib.hOutputs self nixpkgs "tasty-plus" {
 #      deps = { inherit exited more-unicode; };
       ghc = p: p.ghc8107; # for tfmt
-      callPackage = { mkDerivation, lib, system
+      callPackage = { mkDerivation, lib, mapPkg, system
                     , base, base-unicode-symbols, data-textual, deepseq
                     , directory, mtl, optparse-applicative, safe, tasty
                     , tasty-hunit, tasty-quickcheck, temporary, text

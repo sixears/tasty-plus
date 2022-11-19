@@ -25,7 +25,7 @@
         in
           mkDerivation {
             pname = "tasty-plus";
-            version = "1.5.2.16";
+            version = "1.5.2.22";
             src = ./.;
             libraryHaskellDepends = [
               base base-unicode-symbols data-textual deepseq directory mtl

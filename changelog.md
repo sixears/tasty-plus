@@ -1,3 +1,8 @@
+1.5.3.0 2026-07-07
+==================
+- remove unneeded `make`
+- update for quickcheck-0.11
+
 1.5.2.24 2022-11-20
 ===================
 - has-callstack->1.0.1.19

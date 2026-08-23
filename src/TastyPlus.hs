@@ -1,8 +1,4 @@
-{- |
-
-Description: utility functions for working with Tasty testing
-
--}
+{-| utility functions for working with Tasty testing -}
 
 module TastyPlus
   ( TastyOpts( TastyOpts ), TastyRunResult(..), TestCmp(..)
@@ -121,8 +117,10 @@ import Safe  ( atMay )
 
 -- tasty -------------------------------
 
-import Test.Tasty          ( TestName, TestTree
-                           , defaultIngredients, testGroup, withResource )
+import Test.Tasty          ( DependencyType( AllFinish ), TestName, TestTree,
+                             defaultIngredients, dependentTestGroup, testGroup,
+                             withResource
+                           )
 import Test.Tasty.Options  ( OptionSet )
 import Test.Tasty.Runners  ( TestPattern, suiteOptionParser, tryIngredients )
 import Test.Tasty.Options  ( singleOption )
@@ -187,6 +185,7 @@ data TastyOpts = TastyOpts { testTree ∷ TestTree, optSet ∷ OptionSet }
 
 ------------------------------------------------------------
 
+{-| possible results of a run -}
 data TastyRunResult = TestSuccess | TestsFailed | TestRunFailure
   deriving (Eq, Show)
 
@@ -323,6 +322,8 @@ mainTests desc ts = do
 
 ----------------------------------------
 
+{-| compare two values - which may be of different types! - with a custom
+    `cmp` function; the `got` value must be `Just x` to succeed -}
 assertCmp' ∷ HasCallStack ⇒
              (α → Text) → (β → Text) → (α → β → 𝔹) → α → 𝕄 β → Assertion
 assertCmp' toTa _ _ expected 𝓝 =
@@ -334,6 +335,8 @@ assertCmp' toTa toTb cmp expected (𝓙 got) =
    in -- equalize prefix lengths to make it easier to diff strings, etc.
        assertBool ("expected: " ⊕ toSa expected ⊕ "\nbut got : " ⊕ toSb got)
                   (cmp expected got)
+
+----------------------------------------
 
 {- | Compare two lists for compatibility, with customized, itemized testing.
      We take the inputs as IO to allow for, well, IO.
@@ -354,13 +357,15 @@ assertListCmpIO toTa toTb cmp name (toList → expect) (fmap toList → got) =
           testCase "count" (got ≫ lengthCheck expect)
         : (assertItem ⊳ zip [0..] expect)
 
-{- | Compare two lists for equality, with itemized testing and IO. -}
+{-| compare two lists for equality, with itemized testing and IO -}
 assertListEqIO' ∷ (Foldable ψ, Foldable φ, Eq α, Printable σ, HasCallStack) ⇒
                   (α → Text) → σ → ψ α → IO (φ α) → TestTree
 assertListEqIO' toT = assertListCmpIO toT toT (≡)
 
+{-| like `assertListEqIO`; but uses the `Printable` value of the expect value as
+    the name -}
 assertListEqIO ∷ (Foldable ψ, Foldable φ, Eq α, Printable α, HasCallStack) ⇒
-                Text → ψ α → IO (φ α) → TestTree
+                 Text → ψ α → IO (φ α) → TestTree
 assertListEqIO = assertListEqIO' toText
 
 --------------------
@@ -445,7 +450,7 @@ assertListEqRTestsF =
 
 ----------------------------------------
 
--- | like `assertListEq`, but takes an Either which must be a Right
+{-| like `assertListEq`, but takes an `Either` which must be a `Right` -}
 assertListEqR' ∷ (Foldable ψ, Foldable φ, Eq α, Show ε) ⇒
                  (α → Text) → 𝕊 → 𝔼 ε (ψ α) → φ α → [TestTree]
 assertListEqR' toT name got expect =
@@ -455,6 +460,8 @@ assertListEqR' toT name got expect =
 
 ----------------------------------------
 
+{-| like `assertListEqRS`; but uses the `show` of the expect value as the test
+    name -}
 assertListEqRS ∷ (Foldable ψ, Foldable φ, Eq α, Show ε, Show α) ⇒
                   𝕊 → 𝔼 ε (ψ α) → φ α → [TestTree]
 assertListEqRS = assertListEqR' (pack ∘ show)
@@ -521,8 +528,8 @@ assertIsJust = assertJust (const $ assertSuccess "is Just")
 
 ----------------------------------------
 
-{- | Note that this is to check errors thrown within IO; use `assertIOError` to
-     check for `MonadError`/`ExceptT ε IO` errors. -}
+{- | note that this is to check errors thrown within IO; use `assertIOError` to
+     check for `MonadError`/`ExceptT ε IO` errors -}
 assertExceptionIO ∷ (NFData α) ⇒ 𝕊 → (SomeException → 𝔹) → IO α → IO ()
 assertExceptionIO n p io =
   handle (return ∘ 𝓛) (𝓡 ⊳ (io ≫ evaluate ∘ force)) ≫ \ case
@@ -544,6 +551,7 @@ assertException n p v = assertExceptionIO n p (return v)
 assertAnyException ∷ (NFData α) ⇒ 𝕊 → α → IO ()
 assertAnyException n = assertException n (const 𝓣)
 
+{-| assert that an exception is thrown from an IO action; we don't care whoCreated   exception, any exception will do -}
 assertAnyExceptionIO ∷ (NFData α) ⇒ 𝕊 → IO α → IO ()
 assertAnyExceptionIO n = assertExceptionIO n (const 𝓣)
 
@@ -606,21 +614,24 @@ assertEqTestsF =
 ----------------------------------------
 
 {- | Construct a test group, wherein each test is passed a value that has been
-     pre-initialized in some IO.  Note that the IO is re-run for each test.
+     pre-initialized in some IO.  Note that the IO is re-run for each test.  The
+     tests are forced to run sequentially, but failed tests do not cause later
+     tests to be skipped.
  -}
 ioTests ∷ TestName → [(TestName, α → Assertion)] → IO α → TestTree
 ioTests name ts ioa =
-  testGroup name $ (\ (tname,t) → testCase tname $ ioa ≫ t) ⊳ ts
+  dependentTestGroup name AllFinish $ (\ (tname,t)→testCase tname $ ioa≫t) ⊳ ts
 
 ----------------------------------------
 
-{- | like `withResource`, but with a no-op release resource.  Note that unlike
-     `ioTests`; the IO is only run once. -}
+{-| like `withResource`, but with a no-op release resource.  Note that unlike
+    `ioTests`; the IO is only run once. -}
 withResource' ∷ IO α → (IO α → TestTree) → TestTree
 withResource' = flip withResource (const $ return ())
 
 ----------------------------------------
 
+{-| with 2 resources, an α and a β -}
 withResource2 ∷ IO α → (α → IO()) → IO β → (β → IO ()) → (IO α → IO β →TestTree)
               → TestTree
 withResource2 gain lose gain' lose' ts =
@@ -628,8 +639,8 @@ withResource2 gain lose gain' lose' ts =
 
 ----------------------------------------
 
-withResource2' ∷ IO α → IO β → (IO α → IO β → TestTree)
-              → TestTree
+{-| with 2 resources, an α and a β; the releases are no-ops -}
+withResource2' ∷ IO α → IO β → (IO α → IO β → TestTree) → TestTree
 withResource2' gain gain' ts =
   withResource' gain (\ x → withResource' gain' (\ x' → ts x x'))
 
@@ -697,15 +708,19 @@ instance Printable α ⇒ Printable (P (Parsed α)) where
         list    ts = bracketsp $ intercalate ", " (quote ⊳ ts)
      in P.string $ "MALFORMED: " ⊕ quote s ⊕ " " ⊕ list ss
 
+{-| property test that `parseString (toString) x` is still `x` -}
 propInvertibleString ∷ (Eq α, Printable α, Textual α) ⇒ α → Property
 propInvertibleString d = P (parseString (toString d)) ≣ P (Parsed d)
 
+{-| property test that `parseText (toText) x` is still `x` -}
 propInvertibleText ∷ (Eq α, Printable α, Textual α) ⇒ α → Property
 propInvertibleText d = P (parseText (toText d)) ≣ P (Parsed d)
 
+{-| property test that `parseUtf8 (toUtf8) x` is still `x`, -}
 propInvertibleUtf8 ∷ (Eq α, Printable α, Textual α) ⇒ α → Property
 propInvertibleUtf8 d = P (parseUtf8 (toUtf8 d)) ≣ P (Parsed d)
 
+{-| property test that a function is associative -}
 propAssociative ∷ (Eq α, Printable α) ⇒ (α → α → α) → α → α → α → Property
 propAssociative f a b c = f a (f b c)  ≣ f (f a b) c
 
@@ -835,6 +850,7 @@ _ftest = do
   TestSuccess ← runTestTree_ _failTests
   return ()
 
+{-| unit tests -}
 tests ∷ TestTree
 tests = testGroup "tests" [ unitTests, pTests, propTests ]
 

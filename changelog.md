@@ -1,3 +1,7 @@
+1.5.4.0 2026-08-23
+==================
+- make ioTests run sequentially
+
 1.5.3.0 2026-07-07
 ==================
 - remove unneeded `make`

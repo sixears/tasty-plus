@@ -1,7 +1,5 @@
-{-# LANGUAGE NoImplicitPrelude    #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE UnicodeSyntax        #-}
-
+{-| implementation of `(≃)`, which is "approximately equal": for testing purposes
+    ONLY -}
 module TastyPlus.Equish
   ( Equish( (≃) ) )
 where

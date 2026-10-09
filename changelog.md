@@ -1,3 +1,7 @@
+1.5.6.0 2026-10-09
+==================
+- +TastyPlus.assertIsNothing
+
 1.5.5.0 2026-10-09
 ==================
 - +TastyPlus.assertEq, +TastyPlus.assertEq'

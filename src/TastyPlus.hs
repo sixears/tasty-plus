@@ -11,7 +11,8 @@ module TastyPlus
   , assertEq, assertEq'
   , assertException, assertExceptionIO
   , assertIOError
-  , assertJust, assertIsJust, assertIsLeft, assertLeft, assertRight
+  , assertJust, assertIsJust, assertIsNothing
+  , assertIsLeft, assertLeft, assertRight
   , assertListCmp, assertListCmpIO
   , assertListEq, assertListEqIO, assertListEqIO'
   , assertListEq', assertListEqR, assertListEqR', assertListEqRS
@@ -53,7 +54,7 @@ import Data.Functor            ( fmap )
 import Data.Int                ( Int )
 import Data.List               ( drop, inits, init, intercalate, tails
                                , zip, zipWith3 )
-import Data.Maybe              ( fromMaybe  )
+import Data.Maybe              ( fromMaybe, isNothing )
 import Data.Monoid             ( mempty )
 import Data.Ratio              ( Rational )
 import Data.Tuple              ( snd, uncurry )
@@ -99,6 +100,7 @@ import Data.MoreUnicode.Either       ( 𝔼, pattern 𝓡, pattern 𝓛 )
 import Data.MoreUnicode.Functor      ( (⊳) )
 import Data.MoreUnicode.Maybe        ( 𝕄, pattern 𝓙, pattern 𝓝 )
 import Data.MoreUnicode.Monad        ( (⪼), (≫) )
+import Data.MoreUnicode.Semigroup    ( (◇) )
 import Data.MoreUnicode.String       ( 𝕊 )
 
 -- mtl ---------------------------------
@@ -530,6 +532,12 @@ assertJust assertion got =
 {- | Merely check that a value is a Just <something>. -}
 assertIsJust ∷ 𝕄 α → Assertion
 assertIsJust = assertJust (const $ assertSuccess "is Just")
+
+----------------------------------------
+
+{- | Merely check that a value is a `Nothing`. -}
+assertIsNothing ∷ Show α => 𝕄 α → Assertion
+assertIsNothing x = assertBool ("is Nothing: " ◇ show x) (isNothing x)
 
 ----------------------------------------
 

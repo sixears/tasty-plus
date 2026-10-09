@@ -1,3 +1,7 @@
+1.5.5.0 2026-10-09
+==================
+- +TastyPlus.assertEq, +TastyPlus.assertEq'
+
 1.5.4.0 2026-08-23
 ==================
 - make ioTests run sequentially

@@ -8,6 +8,7 @@ module TastyPlus
 
   , assertAnyException, assertAnyExceptionIO
   , assertCmp'
+  , assertEq, assertEq'
   , assertException, assertExceptionIO
   , assertIOError
   , assertJust, assertIsJust, assertIsLeft, assertLeft, assertRight
@@ -357,10 +358,14 @@ assertListCmpIO toTa toTb cmp name (toList → expect) (fmap toList → got) =
           testCase "count" (got ≫ lengthCheck expect)
         : (assertItem ⊳ zip [0..] expect)
 
+----------------------------------------
+
 {-| compare two lists for equality, with itemized testing and IO -}
 assertListEqIO' ∷ (Foldable ψ, Foldable φ, Eq α, Printable σ, HasCallStack) ⇒
                   (α → Text) → σ → ψ α → IO (φ α) → TestTree
 assertListEqIO' toT = assertListCmpIO toT toT (≡)
+
+----------------------------------------
 
 {-| like `assertListEqIO`; but uses the `Printable` value of the expect value as
     the name -}
